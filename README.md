@@ -170,6 +170,27 @@ SDTS_A[]       = nothing  # Gaussian scale; nothing → SDTS_M/10
 
 Harmonic search parameters are in `HARM_KW_MORE` (`usv_detection_3.jl`); detection thresholds are keyword arguments of `usv_whole_2d` in the same file.
 
+### Frequency-bound refinement (branch `10`)
+
+Box frequency bounds are computed by `usv_harmonic_analysis` with three refinements (all on by default):
+
+| Option | Default | What it does |
+|---|---|---|
+| `measure_sng`, `measure_floor` | `spec.fout`, `row_noise_floor(spec.fout)` (set in `Jwi-eak.jl`) | Ridges are **found** on the SDTS map, but their width is **measured** on the raw spectrogram, so SDTS no longer shaves the ridge skirts. `nothing` = measure on the SDTS map (old behaviour). |
+| `subbin` | `true` | Edges are placed where the ridge crosses the threshold, interpolated in dB between bins (the ridge contour uses parabolic peak interpolation). Removes the ±0.5-bin (~±244 Hz) quantisation. |
+| `bound_mode`, `edge_jump_hz` | `:continuous`, `4000.0` | The lowest/highest edge counts only if a neighbouring column's edge is within `edge_jump_hz`. A single noisy column can no longer stretch the box, while sweep ends that continue smoothly are kept. `:quantile` = old `ridge_q_lo`/`ridge_q_hi` rule. |
+
+`usv_harmonic_analysis(...; bound_mode=:quantile, subbin=false)` without `measure_sng` reproduces the temp9 result.
+Each result also carries `contour_t` / `contour_hz`, the sub-bin fundamental ridge.
+
+Benchmark on synthetic calls with known frequency ranges (old vs new, several SNRs):
+
+```bash
+julia --project=. benchmark/freq_bounds_benchmark.jl
+```
+
+`compare_boxes` in the same file compares automatic boxes against manually corrected ones.
+
 ---
 
 ## Controls

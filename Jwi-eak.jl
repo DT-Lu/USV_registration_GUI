@@ -543,7 +543,9 @@ function do_detection()
         det = usv_detect_2d(sng, dt, t, f;
             fhigh = fh,
             harmonics = true,
-            harm_sng = snr_spectrogram(fout_in),
+            harm_sng = snr_spectrogram(fout_in),        # ridge 검출: SDTS 맵
+            measure_sng = spec.fout,                    # 경계 측정: 원본 맵 (SDTS 가 ridge 폭을 깎지 않은 것)
+            measure_floor = row_noise_floor(spec.fout),
             harm_kw = HARM_KW_MORE)
 
         boxes = bounds_to_liness(det.ON, det.OFF, det.bounds, (; f=f, t_sng=t_sng_obs[]))

@@ -32,6 +32,11 @@
 #       hysteresis tracking 으로 채택, 연속성 필터는 고립점 제거로 (강한 ridge 위/아래 잘림 수정)
 #     - (2026-10) box y 좌표를 1 - f/fmax 대신 GUI 의 bin 규약
 #       y = (nfreq+1-bin)/nfreq 로 통일 (freq_bin_to_userunit / userunit_to_freq_bin).
+#     - (2026-11) 주파수 경계 정밀화 (usv_harmonic_analysis):
+#         measure_sng/measure_floor : ridge 는 SDTS 맵에서 찾고 폭은 원본 맵에서 측정
+#         subbin                    : edge 를 dB 보간한 서브빈 위치로, contour 는 포물선 보간
+#         bound_mode=:continuous    : 이웃 컬럼과 이어진 극단 edge 만 box 경계로 (튄 컬럼 1개 무시)
+#       bound_mode=:quantile, subbin=false, measure_sng=nothing 이면 temp9 결과와 같음.
 # =====================================================================
 
 using SparseArrays
@@ -668,18 +673,85 @@ const HARM_KW_MORE = (; n_peaks=6, peak_rel=0.01, local_k=3.0,
 #   Nyquist 근처의 약한 harmonic 이 상대적으로 드러남. 원본(denoise 전) fout 을 넣을 것.
 #   q: 행별 잡음 추정 분위수 (USV 는 시간상 sparse 하므로 median 이면 충분)
 function snr_spectrogram(sng::AbstractMatrix{<:Real}; q::Float64=0.5)
+    nfl = row_noise_floor(sng; q=q)
     out = Matrix{Float64}(undef, size(sng))
-    @inbounds for r in axes(sng, 1)
-        row = @view sng[r, :]
-        vals = Float64[v for v in row if isfinite(v)]
-        nf = isempty(vals) ? 0.0 : quantile(vals, q)
-        nf = nf > 0 ? nf : eps()
-        for c in axes(sng, 2)
-            v = sng[r, c]
-            out[r, c] = isfinite(v) ? max(Float64(v), 0.0) / nf : 0.0
-        end
+    @inbounds for c in axes(sng, 2), r in axes(sng, 1)
+        v = sng[r, c]
+        out[r, c] = isfinite(v) ? max(Float64(v), 0.0) / nfl[r] : 0.0
     end
     return out
+end
+
+# 행(주파수)별 잡음 바닥 벡터 (snr_spectrogram 의 분모). 0 이하이면 eps().
+#   SNR 행렬 전체를 만들지 않고 컬럼 단위로 나눠 쓰고 싶을 때 사용
+#   (usv_harmonic_analysis 의 measure_sng / measure_floor).
+function row_noise_floor(sng::AbstractMatrix{<:Real}; q::Float64=0.5)
+    nfl = Vector{Float64}(undef, size(sng, 1))
+    for r in axes(sng, 1)
+        vals = Float64[v for v in @view(sng[r, :]) if isfinite(v)]
+        x = isempty(vals) ? 0.0 : quantile(vals, q)
+        nfl[r] = x > 0 ? x : eps()
+    end
+    return nfl
+end
+
+# --- 주파수 경계 정밀화 helper (2026-11) -------------------------------
+
+# 실수 bin 위치 → Hz (f 는 등간격이 아니어도 됨: 인접 bin 사이 선형 보간)
+function _bin_to_hz(f::AbstractVector{<:Real}, x::Real)
+    n = length(f)
+    n == 1 && return Float64(f[1])
+    i = clamp(floor(Int, x), 1, n - 1)
+    return Float64(f[i]) + (x - i) * Float64(f[i+1] - f[i])
+end
+
+# 포물선 보간 peak 위치 (log 값에서). v(r) 는 bin r 의 선형 파워. 반환: 실수 bin.
+#   Hann 창 + log 파워에서 bin 양자화 오차(±0.5 bin)를 ~0.1 bin 이하로 줄임.
+function _parabolic_peak(v, b::Int, lo::Int, hi::Int)
+    (b <= lo || b >= hi) && return float(b)
+    a, c, d = log(max(v(b - 1), floatmin())), log(max(v(b), floatmin())), log(max(v(b + 1), floatmin()))
+    den = a - 2c + d
+    den < 0 || return float(b)                    # 볼록하지 않으면(평평/이상) 보간 안 함
+    return b + clamp(0.5 * (a - d) / den, -0.5, 0.5)
+end
+
+# 임계 thr 를 안쪽 값 vin(≥thr) 과 바깥 값 vout(<thr) 사이에서 지나는 위치 (0..1, 안쪽 기준).
+#   dB 선형 보간. 0 = 안쪽 bin 위, 1 = 바깥 bin 위.
+function _cross_frac(vin::Real, vout::Real, thr::Real)
+    vin > thr || return 0.0
+    num = log(vin / thr)
+    den = log(vin / max(vout, floatmin()))
+    return den > 0 ? clamp(num / den, 0.0, 1.0) : 0.0
+end
+
+# 최소 높이 보장 + band clamp (실수 bin 버전)
+function _ensure_min_height_f(a::Real, c::Real, min_h::Real, lo::Int, hi::Int)
+    if c - a < min_h
+        m = (a + c) / 2
+        a, c = m - min_h / 2, m + min_h / 2
+    end
+    return clamp(Float64(a), lo, hi), clamp(Float64(c), lo, hi)
+end
+
+# 컬럼별 edge 목록에서 box 경계 (bound_mode=:continuous).
+#   cols : 각 edge 가 속한 컬럼 번호 (시간 순서, 같은 컬럼 여러 개 가능 = harmonic)
+#   e    : (아래 edge, 위 edge) 실수 bin
+#   한 컬럼의 극단값은 시간상 이웃 컬럼(앞/뒤 중 하나)의 같은 쪽 edge 와 jump bin 이내일 때만
+#   인정 → 잡음으로 한 컬럼만 튄 edge 는 버리고, sweep 끝처럼 이웃과 이어진 극단은 유지.
+#   (예전 quantile(…, 0.99) 는 컬럼 < 100 개면 사실상 최댓값이라 튄 컬럼 하나가 box 를 결정)
+function _continuous_extent(cols::AbstractVector{<:Integer},
+                            e::AbstractVector{<:Tuple{<:Real,<:Real}}, jump::Real)
+    u = unique(cols)
+    elo = [minimum(first(e[k]) for k in eachindex(cols) if cols[k] == c) for c in u]
+    ehi = [maximum(last(e[k])  for k in eachindex(cols) if cols[k] == c) for c in u]
+    n = length(u)
+    n <= 2 && return minimum(elo), maximum(ehi)
+    supported(x, i) = (i > 1 && abs(x[i] - x[i-1]) <= jump) || (i < n && abs(x[i] - x[i+1]) <= jump)
+    okl = [supported(elo, i) for i in 1:n]
+    okh = [supported(ehi, i) for i in 1:n]
+    a = any(okl) ? minimum(elo[okl]) : median(elo)
+    c = any(okh) ? maximum(ehi[okh]) : median(ehi)
+    return a, c
 end
 
 # 한 컬럼의 peak 후보 (band-local index, 진폭 내림차순)
@@ -817,9 +889,20 @@ function usv_harmonic_analysis(sng::AbstractMatrix{<:Real}, f, on::Integer, off:
                                mask_z::Float64=3.0, mask_dilate::Int=5,
                                harmonic_box::Symbol=:all,
                                ridge_q_lo::Float64=0.02, ridge_q_hi::Float64=0.99,
-                               margin_bins::Int=4, min_height_bins::Int=6)
+                               margin_bins::Int=4, min_height_bins::Int=6,
+                               bound_mode::Symbol=:continuous, edge_jump_hz::Float64=4_000.0,
+                               subbin::Bool=true,
+                               measure_sng::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+                               measure_floor::Union{Nothing,AbstractVector{<:Real}}=nothing,
+                               peak_search_bins::Int=2)
     harmonic_box in (:all, :fundamental) ||
         throw(ArgumentError("harmonic_box must be :all or :fundamental"))
+    bound_mode in (:continuous, :quantile) ||
+        throw(ArgumentError("bound_mode must be :continuous or :quantile (got $bound_mode)"))
+    measure_sng === nothing || size(measure_sng) == size(sng) ||
+        throw(DimensionMismatch("measure_sng must have the same size as sng"))
+    measure_floor === nothing || length(measure_floor) == size(sng, 1) ||
+        throw(DimensionMismatch("measure_floor must have length size(sng, 1)"))
     n_peaks >= 1 || throw(ArgumentError("n_peaks must be >= 1"))
     max_harmonic >= 2 || throw(ArgumentError("max_harmonic must be >= 2"))
     # jump_win 은 예전 running-median 연속성 필터용 (호환을 위해 인자만 유지)
@@ -832,17 +915,29 @@ function usv_harmonic_analysis(sng::AbstractMatrix{<:Real}, f, on::Integer, off:
     max_edge = max(0, round(Int, max_edge_hz / df))
     hkw = (; tol=harm_tol, max_harmonic=max_harmonic, fs=fs, alias_tol=alias_tol)
     pad(a, b) = _ensure_min_height(a - margin_bins, b + margin_bins, min_height_bins, lo, hi)
+    padf(a, b) = _ensure_min_height_f(a - margin_bins, b + margin_bins, min_height_bins, lo, hi)
+    edge_jump = edge_jump_hz / df
 
-    # 결과 생성 (모든 return 이 같은 필드 순서)
+    # 경계 측정용 값 (A: "검출은 필터 맵, 측정은 원본 맵")
+    #   measure_sng === nothing → sng 그대로 (예전 동작)
+    #   measure_sng 지정        → measure_sng[r,t] / measure_floor[r]  (SNR 행렬을 따로 만들지 않음)
+    measuring = measure_sng !== nothing
+    mval(r::Int, t::Int) = !measuring ? Float64(sng[r, t]) :
+        (x = Float64(measure_sng[r, t]); x = isfinite(x) ? max(x, 0.0) : 0.0;
+         measure_floor === nothing ? x : x / Float64(measure_floor[r]))
+
+    # 결과 생성 (모든 return 이 같은 필드 순서). 경계 인자는 정수/실수 bin 모두 가능.
+    #   contour_t / contour_hz : 경계 계산에 쓴 fundamental ridge (컬럼, 서브빈 Hz)
     function result(b_lo, b_hi, fb_lo, fb_hi; is_harmonic=false, harm_frac=0.0,
                     n_components=1, orders=Int[], n_aliased=0, ratio=missing,
-                    harm_lo=missing, harm_hi=missing, valid=true, n_cols=0, fallback=false)
-        return (; f_lo=Float64(f[b_lo]), f_hi=Float64(f[b_hi]),
+                    harm_lo=missing, harm_hi=missing, valid=true, n_cols=0, fallback=false,
+                    contour_t=Int[], contour_hz=Float64[])
+        return (; f_lo=_bin_to_hz(f, b_lo), f_hi=_bin_to_hz(f, b_hi),
                   is_harmonic, harm_frac, n_components,
                   orders, max_order=isempty(orders) ? 1 : maximum(orders),
                   n_aliased, ratio,
-                  fund_lo=Float64(f[fb_lo]), fund_hi=Float64(f[fb_hi]),
-                  harm_lo, harm_hi, valid, n_cols, fallback)
+                  fund_lo=_bin_to_hz(f, fb_lo), fund_hi=_bin_to_hz(f, fb_hi),
+                  harm_lo, harm_hi, valid, n_cols, fallback, contour_t, contour_hz)
     end
     # 쓸 컬럼이 없을 때: 세그먼트 에너지 profile → 그것도 없으면 전체 대역 (valid=false)
     function fallback_result()
@@ -851,19 +946,40 @@ function usv_harmonic_analysis(sng::AbstractMatrix{<:Real}, f, on::Integer, off:
         a, b = pad(band...)
         return result(a, b, a, b; fallback=true)
     end
+    # 측정 맵에서 peak 재정렬: 검출 맵(필터)의 peak b0 주변 ±peak_search_bins 안의 최대 bin
+    function refine_peak(b0::Int, t::Int)
+        measuring || return b0
+        b = b0; best = mval(b0, t)
+        for r in max(lo, b0 - peak_search_bins):min(hi, b0 + peak_search_bins)
+            v = mval(r, t)
+            v > best && ((b, best) = (r, v))
+        end
+        return b
+    end
+    # 측정 맵 컬럼 잡음 (band 내 median). 측정 맵이 없으면 검출 단계의 noise 를 그대로 씀.
+    meas_noise(t::Int, noise::Float64) =
+        measuring ? median(Float64[mval(r, t) for r in lo:hi]) : noise
+
     # 컬럼 t 에서 peak bin b 의 ridge 폭: 값이 thr 이상으로 이어지는 [a, c] (최대 max_edge bin)
-    function ridge_edges(b::Int, t::Int, noise::Float64)
-        col = @view sng[:, t]
-        thr = max(edge_rel * Float64(col[b]), local_k * noise)
+    #   subbin=true 면 임계를 지나는 위치를 dB 보간한 실수 bin 으로 반환 (B)
+    function ridge_edges(b0::Int, t::Int, noise::Float64)
+        b = refine_peak(b0, t)
+        v(r) = mval(r, t)
+        pk = v(b)
+        thr = max(edge_rel * pk, local_k * noise)
+        pk >= thr || return float(b), float(b)       # 측정 맵에서 임계 미만 → peak 한 점
         a = b
-        while a > lo && b - (a - 1) <= max_edge && col[a-1] >= thr
+        while a > lo && b - (a - 1) <= max_edge && v(a - 1) >= thr
             a -= 1
         end
         c = b
-        while c < hi && (c + 1) - b <= max_edge && col[c+1] >= thr
+        while c < hi && (c + 1) - b <= max_edge && v(c + 1) >= thr
             c += 1
         end
-        return a, c
+        subbin || return float(a), float(c)
+        ea = (a > lo && v(a - 1) < thr) ? a - _cross_frac(v(a), v(a - 1), thr) : float(a)
+        ec = (c < hi && v(c + 1) < thr) ? c + _cross_frac(v(c), v(c + 1), thr) : float(c)
+        return ea, ec
     end
 
     # 0) 세그먼트 에너지 mask (짧은 콜에서 잡음 컬럼 seed 차단용)
@@ -960,18 +1076,36 @@ function usv_harmonic_analysis(sng::AbstractMatrix{<:Real}, f, on::Integer, off:
     end
     orders = sort([k for (k, n) in order_count if n >= 2])   # 한 컬럼에서만 보인 차수는 무시
 
-    # 5) ridge 폭(edge) 으로 경계: 컬럼별 [아래 edge, 위 edge] 의 분위수
+    # 5) ridge 폭(edge) 으로 경계
+    #    bound_mode=:continuous (기본) 이웃 컬럼과 이어진 극단 edge 의 min/max   (E)
+    #    bound_mode=:quantile           컬럼별 edge 의 분위수 (ridge_q_lo / ridge_q_hi, 예전 동작)
+    #    subbin=false 이고 :quantile 이면 예전 결과와 같음 (정수 bin 으로 floor/ceil)
+    noise_cache = Dict{Int,Float64}()
+    noise_of(i) = get!(() -> meas_noise(tcols[i], colnoise[i]), noise_cache, i)
     function band_from(bins, idx)
-        e = [ridge_edges(b, tcols[i], colnoise[i]) for (b, i) in zip(bins, idx)]
-        a = floor(Int, quantile(first.(e), ridge_q_lo))
-        c = ceil(Int, quantile(last.(e), ridge_q_hi))
-        return pad(a, c)
+        e = [ridge_edges(b, tcols[i], noise_of(i)) for (b, i) in zip(bins, idx)]
+        if bound_mode === :quantile
+            a = quantile(first.(e), ridge_q_lo)
+            c = quantile(last.(e), ridge_q_hi)
+        else
+            a, c = _continuous_extent(idx, e, edge_jump)
+        end
+        subbin && return padf(a, c)
+        return pad(floor(Int, a), ceil(Int, c))
+    end
+
+    # fundamental ridge contour (서브빈). feature 계산/검증용으로 반환.
+    contour_t = [tcols[i] for i in fund_i]
+    contour_hz = map(zip(fund_bins, fund_i)) do (b0, i)
+        t = tcols[i]
+        b = refine_peak(b0, t)
+        _bin_to_hz(f, subbin ? _parabolic_peak(r -> mval(r, t), b, lo, hi) : b)
     end
 
     fb_lo, fb_hi = band_from(fund_bins, fund_i)
     if is_harm && !isempty(harm_bins)
         hb_lo, hb_hi = band_from(harm_bins, harm_i)
-        harm_lo, harm_hi = Float64(f[hb_lo]), Float64(f[hb_hi])
+        harm_lo, harm_hi = _bin_to_hz(f, hb_lo), _bin_to_hz(f, hb_hi)
     else
         hb_lo, hb_hi = fb_lo, fb_hi
         harm_lo, harm_hi = missing, missing
@@ -986,7 +1120,8 @@ function usv_harmonic_analysis(sng::AbstractMatrix{<:Real}, f, on::Integer, off:
                   n_components=is_harm ? 1 + maximum(s -> length(s.harms), sets) : 1,
                   orders=orders, n_aliased=n_aliased,
                   ratio=isempty(ratios) ? missing : median(ratios),
-                  harm_lo=harm_lo, harm_hi=harm_hi, n_cols=length(sets))
+                  harm_lo=harm_lo, harm_hi=harm_hi, n_cols=length(sets),
+                  contour_t=contour_t, contour_hz=contour_hz)
 end
 
 # 세그먼트(on:off)의 시간 합 주파수 profile 에서 배경보다 유의하게 높은 행 mask (band-local).
@@ -1112,6 +1247,10 @@ end
 #   harm_kw   : usv_harmonic_analysis 옵션  예) (; n_peaks=3, harmonic_box=:fundamental)
 #   harm_sng  : harmonic 분석에 쓸 별도 spectrogram (예: snr_spectrogram(spec.fout)).
 #               nothing 이면 sng(denoise 된 것) 사용 — 약한 harmonic 이 denoise 로 지워질 수 있음.
+#   measure_sng / measure_floor : 경계(edge) 측정용 원본 spectrogram 과 행별 잡음 바닥
+#               (예: spec.fout, row_noise_floor(spec.fout)). harm_sng(필터 맵)로 ridge 를 찾고
+#               폭은 이 맵에서 잼 — SDTS 가 깎은 ridge 옆 에너지 때문에 box 가 좁아지는 것 방지.
+#               nothing 이면 harm_sng 에서 측정 (예전 동작).
 #   반환: (ON, OFF, bounds, harm)   bounds[k] = (f_lo, f_hi) Hz, harm 은 harmonics=false 면 nothing
 #   ※ harmonic 이 110 kHz 위에 있으면 fhigh 를 올리고 denoise_usv 의 fhigh 도 같이 올릴 것.
 # =====================================================================
@@ -1121,7 +1260,9 @@ function usv_detect_2d(sng::Matrix{Float64}, dt_sng::Float64,
                        flow::Float64=15_000.0, fhigh::Float64=125_000.0,
                        detect_kw::NamedTuple=(;), freq_kw::NamedTuple=(;),
                        harmonics::Bool=false, harm_kw::NamedTuple=(;),
-                       harm_sng::Union{Nothing,AbstractMatrix{<:Real}}=nothing)
+                       harm_sng::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+                       measure_sng::Union{Nothing,AbstractMatrix{<:Real}}=nothing,
+                       measure_floor::Union{Nothing,AbstractVector{<:Real}}=nothing)
     ON, OFF = usv_whole_2d(sng, dt_sng, t_sng, f; detect_kw...)
 
     harm = nothing
@@ -1129,6 +1270,8 @@ function usv_detect_2d(sng::Matrix{Float64}, dt_sng::Float64,
         hs = harm_sng === nothing ? sng : harm_sng
         size(hs) == size(sng) || throw(DimensionMismatch("harm_sng must have the same size as sng"))
         hkw = fmethod === :ridge ? merge(freq_kw, harm_kw) : harm_kw
+        measure_sng === nothing ||
+            (hkw = merge(hkw, (; measure_sng=measure_sng, measure_floor=measure_floor)))
         harm = usv_segment_harmonics(hs, f, ON, OFF; flow=flow, fhigh=fhigh, hkw...)
     end
 
