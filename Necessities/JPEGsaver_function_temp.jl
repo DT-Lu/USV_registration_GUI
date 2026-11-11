@@ -656,3 +656,115 @@ function resize_pad(
     return out
 end
 to_gray(m01::AbstractArray{<:Real}) = Gray.(Float32.(m01))
+
+# =====================================================================
+# GUI 화면과 같은 모양의 crop 이미지 (2026-11)
+#   128×128 로 찌그러뜨리지 않고, GUI spectrogram 창을 timescale(기본 1.5 s)로 봤을 때
+#   화면에 보이는 그 해상도/대비 그대로 저장.
+#     가로: 1 컬럼 = canvas_W · dt / timescale  픽셀
+#     세로: 1 bin  = canvas_H / nfreq            픽셀
+#     대비: GUI 와 같은 clamp(fout, 0, sr) / sr   (sr = sngscale 슬라이더 값)
+#   리샘플: 축소는 면적 평균(Cairo 의 downscale filter 와 같은 효과), 확대는 bilinear.
+#   그래서 이미지 크기는 콜 길이/대역에 비례 (예: 50 ms 콜, 1600 px 창 → 가로 약 53 px).
+# =====================================================================
+
+# nin → nout 1D 리샘플 가중치 (nout × nin)
+function _resample_weights(nin::Int, nout::Int)
+    R = zeros(Float32, nout, nin)
+    if nin == 1
+        R[:, 1] .= 1f0
+        return R
+    end
+    s = nin / nout                       # 출력 1 픽셀 = 입력 s 픽셀
+    if s >= 1                            # 축소: 면적 평균
+        for j in 1:nout
+            a = (j - 1) * s; b = j * s   # 입력 구간 [a, b) (0 기준 연속 좌표)
+            for k in (floor(Int, a) + 1):min(nin, ceil(Int, b))
+                w = min(b, k) - max(a, k - 1)
+                w > 0 && (R[j, k] = Float32(w / s))
+            end
+        end
+    else                                 # 확대: 픽셀 중심 기준 linear 보간
+        for j in 1:nout
+            x = clamp((j - 0.5) * s + 0.5, 1.0, Float64(nin))
+            k = min(floor(Int, x), nin - 1)
+            fr = Float32(x - k)
+            R[j, k] += 1f0 - fr
+            R[j, k+1] += fr
+        end
+    end
+    return R
+end
+
+function _save_gray(fname::AbstractString, img::AbstractMatrix{<:Real}; quality::Int=95)
+    g = Gray.(Float32.(img))
+    if endswith(lowercase(fname), ".png")
+        Images.save(fname, g)
+    else
+        try
+            Images.save(fname, g; quality=quality)
+        catch
+            Images.save(fname, g)
+        end
+    end
+    return fname
+end
+
+"""
+    export_usv_images_gui(fout, f, t_sng, tspans; outdir, sr, kwargs...) -> outdir
+
+GUI 화면 그대로의 crop 이미지 저장. `tspans` = [(t_start, t_end), ...] (초).
+
+- `sr`        : 대비 상한 (GUI sngscale 값). GUI 와 같은 clamp(fout, 0, sr)/sr
+- `timescale` : 기준 화면 폭 (초). 1.5 → GUI timescale 1.5 로 볼 때의 해상도
+- `canvas_px` : (W, H) spectrogram 창 픽셀 크기
+- `band`      : (f_lo, f_hi) Hz 세로 범위. `nothing` 이면 전체 대역
+- `pad_ms`    : 좌우 시간 여백
+- `ext`       : "png" (무손실, 기본) 또는 "jpeg"
+"""
+function export_usv_images_gui(fout::AbstractMatrix{<:Real}, f::AbstractVector{<:Real},
+                               t_sng::AbstractVector{<:Real}, tspans;
+                               outdir::AbstractString, sr::Real,
+                               timescale::Real=1.5, canvas_px::Tuple{Int,Int}=(1600, 500),
+                               band::Union{Nothing,Tuple{<:Real,<:Real}}=(30_000.0, 125_000.0),
+                               pad_ms::Real=0.0, ext::AbstractString="png", quality::Int=95)
+    mkpath(outdir)
+    nfreq, ntime = size(fout)
+    W, H = canvas_px
+    dt = length(t_sng) >= 2 ? Float64(t_sng[2] - t_sng[1]) : 1.0
+    px_per_col = W * dt / timescale
+    px_per_bin = H / nfreq
+
+    y1, y2 = 1, nfreq
+    if band !== nothing
+        y1 = clamp(searchsortedfirst(f, band[1]), 1, nfreq)
+        y2 = clamp(searchsortedlast(f, band[2]), y1, nfreq)
+    end
+    nh = max(1, round(Int, (y2 - y1 + 1) * px_per_bin))
+    Ry = _resample_weights(y2 - y1 + 1, nh)
+
+    pad = pad_ms <= 0 ? 0 : ceil(Int, (pad_ms / 1000) / dt)
+    srf = Float32(max(float(sr), eps(Float64)))
+
+    @printf("Image export: %d boxes, %.1f px/s (timescale %.2f s, canvas %d×%d), height %d px -> %s\n",
+            length(tspans), W / timescale, timescale, W, H, nh, outdir)
+    for (i, (ta, tb)) in enumerate(tspans)
+        ta, tb = minmax(Float64(ta), Float64(tb))
+        x1 = clamp(searchsortedfirst(t_sng, ta) - pad, 1, ntime)
+        x2 = clamp(searchsortedlast(t_sng, tb) + pad, x1, ntime)
+
+        src = clamp.(Float32.(@view fout[y1:y2, x1:x2]), 0f0, srf) ./ srf
+        reverse!(src, dims=1)                         # 위 = 고주파 (GUI 와 같음)
+        nw = max(1, round(Int, (x2 - x1 + 1) * px_per_col))
+        img = clamp.(Ry * src * transpose(_resample_weights(x2 - x1 + 1, nw)), 0f0, 1f0)
+
+        fname = joinpath(outdir, @sprintf("%04d_%.4f-%.4f_gui.%s", i, ta, tb, ext))
+        try
+            _save_gray(fname, img; quality=quality)
+        catch e
+            @warn "image save failed: box $i" exception = (e, catch_backtrace())
+        end
+    end
+    println("Image export finished.")
+    return outdir
+end

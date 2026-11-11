@@ -13,7 +13,7 @@ A Julia/Gtk graphical interface for **registering and inspecting mouse ultrasoni
 * Manually draw, move, resize and delete USV bounding boxes
 * Per-USV close-up view with acoustic features
 * Population histograms of acoustic features
-* Save annotations as `.jld` and automatically export each USV as a 128 × 128 JPEG
+* Save annotations as `.jld`, optionally exporting each USV as an image at the resolution seen in the GUI (chosen at startup: **Save images** or **Lite**)
 * Window title shows the current file and an unsaved-changes marker (`*`)
 * Keyboard and mouse-wheel navigation
 
@@ -249,21 +249,41 @@ d["liness"]   # Vector{USVBox}
 
 `.jld` files from earlier versions load in temp9; the y unit (ratio or frequency bin) is detected automatically.
 
-### JPEGs
+### Images (Save images mode)
 
-Every save also exports each USV as a grayscale JPEG:
+When the GUI starts, a dialog asks for the session mode:
+
+* **Save images** — Save writes the `.jld` **and** one image per USV.
+* **Lite** — Save writes the `.jld` only.
+
+The current mode is shown in the window title (`[Save images]` / `[Lite]`).
 
 ```text
-USV260801_001_jpegs/
-  0001_12.3456-12.4012_lowcut.jpeg
+USV260801_001_images/
+  0001_12.3456-12.4012_gui.png
   0002_...
 ```
 
-* Filename: `<index>_<start s>-<end s>_lowcut.jpeg`
-* Size: 128 × 128 (stretched, not padded)
-* Frequency range limited to **30–125 kHz** inside the box
-* Contrast: 2nd–98th percentile normalization
+* Images look like the GUI spectrogram does at **timescale 1.5 s**. They are not squashed to 128 × 128, so each image's size follows the call's duration and band.
+  * width = columns × canvas_width × dt / 1.5
+  * height = bins × canvas_height / nfreq
+* Contrast is the same as the GUI: `clamp(fout, 0, sngscale) / sngscale`, using the slider value at save time.
+* Frequency range is **30–125 kHz**; the time range is the box itself.
+* Format is lossless PNG.
 * Taken from the same channel as the GUI (`choice`)
+
+Settings (`Jwi-eak.jl`, can be changed from the REPL):
+
+```julia
+EXPORT_TIMESCALE[] = 1.5            # reference GUI timescale (s)
+EXPORT_CANVAS_PX[] = nothing        # nothing = current spectrogram window size; (1600, 500) = fixed
+EXPORT_BAND[]      = (30e3, 125e3)  # nothing = full band
+EXPORT_PAD_MS[]    = 0.0            # time padding on each side
+EXPORT_EXT[]       = "png"          # or "jpeg"
+```
+
+With `EXPORT_CANVAS_PX[] = nothing` the pixel scale depends on the window size at save time. For datasets that must share one scale, set a fixed size.
+The old 128 × 128 exporter (`export_jpegs_after_save`) is still available for manual use.
 
 These images are intended for image-based analyses such as dimensionality reduction, clustering, or neural-network models.
 

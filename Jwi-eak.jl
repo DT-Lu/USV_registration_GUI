@@ -83,6 +83,32 @@ function sanity_check_liness!(lns, tmax)
     @info "sanity_check" total = length(lns) bad = bad tmax = tmax
 end
 
+# ---- 이미지 저장 설정 (REPL 에서 바꿔가며 사용 가능) ----
+#   GUI 화면을 timescale = EXPORT_TIMESCALE 초로 볼 때의 해상도로 crop 저장.
+#   EXPORT_CANVAS_PX = nothing → 저장 시점의 실제 spectrogram 창 크기 사용
+#                     (W, H)   → 고정 크기 (창 크기와 무관하게 같은 픽셀 스케일; 학습 데이터용 권장)
+const EXPORT_TIMESCALE = Ref(1.5)
+const EXPORT_CANVAS_PX = Ref{Union{Nothing,Tuple{Int,Int}}}(nothing)
+const EXPORT_BAND      = Ref{Union{Nothing,Tuple{Float64,Float64}}}((30_000.0, 125_000.0))
+const EXPORT_PAD_MS    = Ref(0.0)
+const EXPORT_EXT       = Ref("png")      # "png" (무손실) | "jpeg"
+
+# 시작할 때 모드 선택: true = 저장 시 이미지도 export, false = Lite (.jld 만 저장)
+function choose_image_mode()
+    msg = "Save mode for this session\n\n" *
+          "• Save images: Save writes the .jld AND a cropped image of every USV\n" *
+          "   (as it looks in the GUI at timescale $(EXPORT_TIMESCALE[]) s).\n" *
+          "• Lite: Save writes the .jld only (fast, no images)."
+    mode = try
+        ask_dialog(msg, "Lite (no images)", "Save images")
+    catch e
+        @warn "mode dialog failed; using Lite mode" exception = (e, catch_backtrace())
+        false
+    end
+    println(mode ? "Mode: Save images" : "Mode: Lite (no image export)")
+    return mode
+end
+
 function export_jpegs_after_save(nmjld::AbstractString;
     outdir::Union{Nothing,String}=nothing,
     outH::Int=128,
@@ -122,6 +148,7 @@ function make_gui()
     try
         nm_ref = Ref{String}("")
         dirty_ref = Ref(false)
+        image_mode = Ref(choose_image_mode())   # 매번 GUI 를 열 때 선택
 
         spec_obs = Observable{Any}(nothing)
         fout_obs = Observable{Matrix{Float64}}(zeros(1, 1))
@@ -135,6 +162,7 @@ function make_gui()
             dirty::Bool=false,
         )
             file_label = isempty(filename) ? "USV Manual" : basename(filename)
+            file_label = string(file_label, image_mode[] ? "  [Save images]" : "  [Lite]")
             Gtk.GAccessor.title(win, dirty ? "$(file_label) *" : file_label)
             return nothing
         end
@@ -579,11 +607,40 @@ end
                 pure = strip_gui_types(linesave)
                 JLD.save(nmjld, "liness", pure, "y_unit", "ratio")
 
-                export_jpegs_after_save(nmjld)
+                if image_mode[]
+                    export_images_after_save(nmjld, linesave)
+                else
+                    println("Lite mode: image export skipped")
+                end
 
                 set_dirty!(false)
                 println("save is done: okay to close the window")
             end
+        end
+
+        # GUI 화면 해상도 그대로 crop 이미지 저장 (Save images 모드)
+        function export_images_after_save(nmjld::AbstractString, lns)
+            spec = spec_obs[]
+            spec === nothing && return nothing
+            dotloc = findlast('.', nmjld)
+            base = (dotloc === nothing) ? nmjld : nmjld[1:(dotloc-1)]
+            outdir = string(base, "_images")
+
+            px = EXPORT_CANVAS_PX[]
+            if px === nothing
+                w, h = Gtk.width(sngw), Gtk.height(sngw)
+                px = (w > 1 && h > 1) ? (Int(w), Int(h)) : (1600, 500)
+            end
+            tspans = [(Float64(l[1].x.val), Float64(l[2].x.val)) for l in lns]
+            export_usv_images_gui(spec.fout, spec_freq_axis(spec), t_sng_obs[], tspans;
+                outdir=outdir,
+                sr=float(sngscale.observable[]),
+                timescale=EXPORT_TIMESCALE[],
+                canvas_px=px,
+                band=EXPORT_BAND[],
+                pad_ms=EXPORT_PAD_MS[],
+                ext=EXPORT_EXT[])
+            return outdir
         end
 
         # delete button 
