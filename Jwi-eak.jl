@@ -166,6 +166,42 @@ function export_jpegs_after_save(nmjld::AbstractString;
     return outdir
 end
 
+# 녹음/annotation 파일을 못 읽었을 때 (손상·잘린 파일, 짝 .h5 없음, 없는 channel ...)
+struct FileLoadError <: Exception
+    path::String
+    cause::Any
+end
+Base.showerror(io::IO, e::FileLoadError) = print(io, "could not open ", e.path, ": ", load_error_hint(e))
+
+# 원인별로 사용자가 할 일을 한 줄로
+function load_error_hint(e::FileLoadError)
+    msg = sprint(showerror, e.cause)
+    if occursin("truncated", msg)
+        m = match(r"eof = (\d+).*?stored_eof = (\d+)", msg)
+        sizes = m === nothing ? "" :
+            " (on disk $(round(parse(Int, m[1]) / 1e6, digits=1)) MB of $(round(parse(Int, m[2]) / 1e6, digits=1)) MB)"
+        return "the .h5 file is incomplete$(sizes): an unfinished download/copy or a recording still being written. Copy the file again from its source."
+    elseif occursin("짝이 되는 h5", msg) || occursin("matching", msg)
+        return "the matching .h5 recording is missing; it must be in the same folder as the .jld with the same name."
+    elseif e.cause isa BoundsError
+        return "the recording does not have analog channel $(choice). Start with --channel 1 or pick the other channel."
+    elseif occursin("No such file", msg) || occursin("not found", lowercase(msg))
+        return "the file was not found."
+    elseif occursin("unable to lock", lowercase(msg)) || occursin("Permission", msg)
+        return "the file is locked or not readable (open in another program, e.g. WaveSurfer?)."
+    else
+        return first(split(msg, '\n'))
+    end
+end
+
+function report_load_error(e::FileLoadError)
+    println(stderr, "\n[Could not open file] ", basename(e.path))
+    println(stderr, "  ", load_error_hint(e))
+    println(stderr, "  Full path: ", e.path)
+    @debug "load error details" exception = e.cause
+    return nothing
+end
+
 # GUI 시작 (GTK4: dialog 가 비동기라 callback 으로 이어짐)
 #   mode dialog (image_cfg 가 없을 때) → file dialog (file 이 없을 때) → build_gui
 # file      : 열 파일 (.h5/.jld). nothing → file dialog
@@ -177,16 +213,28 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
     function start(cfg)
         println("Image mode: ", cfg.name, "  (", cfg.desc, ")")
         if file !== nothing
-            build_gui(String(file), cfg; overrides=overrides) === nothing && notify(GUI_CLOSED)
+            # 명령행으로 준 파일: 못 열면 (메시지 출력 후) 종료
+            build_gui(String(file), cfg; overrides=overrides) isa GtkWindow || notify(GUI_CLOSED)
             return nothing
         end
-        open_dialog("Pick a .h5 recording or .jld annotation") do nm
+        pick_file(cfg)
+        return nothing
+    end
+
+    # 파일 dialog. 고른 파일을 못 열면 이유를 title 에 보여주고 dialog 를 다시 띄움 (취소하면 종료).
+    function pick_file(cfg, title="Pick a .h5 recording or .jld annotation")
+        open_dialog(title) do nm
             try
                 if nm === nothing || isempty(nm)
                     println("No file chosen.")
                     notify(GUI_CLOSED)
-                else
-                    build_gui(String(nm), cfg; overrides=overrides) === nothing && notify(GUI_CLOSED)
+                    return
+                end
+                r = build_gui(String(nm), cfg; overrides=overrides)
+                if r === :load_failed
+                    pick_file(cfg, "Could not open $(basename(nm)) (see console) - pick another file, or Cancel to quit")
+                elseif !(r isa GtkWindow)
+                    notify(GUI_CLOSED)
                 end
             catch e
                 @error "GUI start failed" exception = (e, catch_backtrace())
@@ -211,7 +259,8 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
     return nothing
 end
 
-# 파일 nm 을 열어 main window 를 만듦. 반환: window (실패하면 nothing)
+# 파일 nm 을 열어 main window 를 만듦.
+#   반환: window | :load_failed (파일을 못 읽음; 메시지는 이미 출력) | nothing (그 밖의 시작 오류)
 #   overrides : CLI 값 — 창 안의 Images dropdown 으로 모드를 바꿀 때도 적용
 function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
     try
@@ -249,14 +298,19 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
             return nothing
         end
 
+        # 실패하면 FileLoadError 를 던지고 GUI 상태 (열린 파일 이름, spectrogram, box) 는 그대로 둠.
+        #   (예전에는 nm_ref 를 먼저 바꿔서, Load 가 실패한 뒤 Save 하면 실패한 파일 이름의 .jld 로 저장됐음)
         function load_into_gui!(nm::AbstractString) # seperation : 2026-03-04 
+            spec, tmp = try
+                spec, raw_liness = load_file(String(nm), choice)
+                raw = raw_liness isa Observable ? raw_liness[] : raw_liness
+                tmp = normalize_liness(raw; nfreq=size(spec.fout, 1))
+                (spec, tmp isa Observable ? tmp[] : tmp)
+            catch e
+                throw(FileLoadError(String(nm), e))
+            end
+
             nm_ref[] = String(nm)
-
-            spec, raw_liness = load_file(nm, choice)
-            raw = raw_liness isa Observable ? raw_liness[] : raw_liness
-            tmp = normalize_liness(raw; nfreq=size(spec.fout, 1))
-            tmp = tmp isa Observable ? tmp[] : tmp
-
             set_spec!(spec)
             liness[] = tmp
 
@@ -550,7 +604,14 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
 
         function load_after_dialog!(newnm::AbstractString)
             begin
-                load_into_gui!(newnm)
+                try
+                    load_into_gui!(newnm)
+                catch e
+                    e isa FileLoadError || rethrow()
+                    report_load_error(e)
+                    println("Still showing: ", nm_ref[])
+                    return
+                end
 
                 # reset 
                 drawing[] = false
@@ -1193,6 +1254,10 @@ end
         present(win)              # GTK4: showall 없음 (위젯은 기본으로 보임)
         return win
     catch e
+        if e isa FileLoadError
+            report_load_error(e)
+            return :load_failed
+        end
         @error "GUI initialization crashed BEFORE setup" exception = (e, catch_backtrace())
         println(stderr, "\n=== CRITICAL INIT ERROR ===\n")
         showerror(stderr, e)
