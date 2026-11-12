@@ -718,7 +718,8 @@ GUI 화면 그대로의 crop 이미지 저장. `tspans` = [(t_start, t_end), ...
 - `sr`        : 대비 상한 (GUI sngscale 값). GUI 와 같은 clamp(fout, 0, sr)/sr
 - `timescale` : 기준 화면 폭 (초). 1.5 → GUI timescale 1.5 로 볼 때의 해상도
 - `canvas_px` : (W, H) spectrogram 창 픽셀 크기
-- `band`      : (f_lo, f_hi) Hz 세로 범위. `nothing` 이면 전체 대역
+- `band`      : 세로 범위. `:box` = 각 box 자신의 주파수 범위 (box_freqs 필요; 선택한 box 그대로),
+                (f_lo, f_hi) Hz = 고정 대역, `nothing` = 전체 대역
 - `pad_ms`    : 좌우 시간 여백
 - `ext`       : "png" (무손실, 기본) 또는 "jpeg"
 - `box_freqs` : [(f_lo, f_hi), ...] Hz (metadata 기록용, 선택)
@@ -729,7 +730,7 @@ function export_usv_images_gui(fout::AbstractMatrix{<:Real}, f::AbstractVector{<
                                t_sng::AbstractVector{<:Real}, tspans;
                                outdir::AbstractString, sr::Real,
                                timescale::Real=1.5, canvas_px::Tuple{Int,Int}=(1600, 500),
-                               band::Union{Nothing,Tuple{<:Real,<:Real}}=(30_000.0, 125_000.0),
+                               band::Union{Nothing,Symbol,Tuple{<:Real,<:Real}}=:box,
                                pad_ms::Real=0.0, ext::AbstractString="png", quality::Int=95,
                                box_freqs=nothing)
     mkpath(outdir)
@@ -740,23 +741,37 @@ function export_usv_images_gui(fout::AbstractMatrix{<:Real}, f::AbstractVector{<
     px_per_col = W * dt / timescale
     px_per_bin = H / nfreq
 
-    y1, y2 = 1, nfreq
-    if band !== nothing
-        y1 = clamp(searchsortedfirst(f, band[1]), 1, nfreq)
-        y2 = clamp(searchsortedlast(f, band[2]), y1, nfreq)
+    perbox = band === :box
+    if perbox
+        box_freqs === nothing && throw(ArgumentError("band = :box needs box_freqs"))
+        length(box_freqs) == length(tspans) || throw(DimensionMismatch("box_freqs and tspans differ in length"))
+    elseif band isa Symbol
+        throw(ArgumentError("band must be :box, (f_lo, f_hi) or nothing (got :$band)"))
     end
-    nh = max(1, round(Int, (y2 - y1 + 1) * px_per_bin))
-    Ry = _resample_weights(y2 - y1 + 1, nh)
+    # 주파수 범위 (Hz) → bin 범위. box 경계는 bin 중심 주파수라 searchsorted 로 정확히 그 bin.
+    band_bins(lo, hi) = (a = clamp(searchsortedfirst(f, min(lo, hi)), 1, nfreq);
+                         (a, clamp(searchsortedlast(f, max(lo, hi)), a, nfreq)))
+    fixed_y = band === nothing ? (1, nfreq) : perbox ? nothing : band_bins(band...)
+    fixed_R = fixed_y === nothing ? nothing :
+        _resample_weights(fixed_y[2] - fixed_y[1] + 1, max(1, round(Int, (fixed_y[2] - fixed_y[1] + 1) * px_per_bin)))
 
     pad = pad_ms <= 0 ? 0 : ceil(Int, (pad_ms / 1000) / dt)
     srf = Float32(max(float(sr), eps(Float64)))
 
-    @printf("Image export: %d boxes, %.1f px/s (timescale %.2f s, canvas %d×%d), height %d px -> %s\n",
-            length(tspans), W / timescale, timescale, W, H, nh, outdir)
+    @printf("Image export: %d boxes, %.1f px/s, %.2f px/bin (timescale %.2f s, canvas %d×%d), band %s -> %s\n",
+            length(tspans), W / timescale, px_per_bin, timescale, W, H,
+            perbox ? "= each box" : band === nothing ? "full" : "fixed", outdir)
     for (i, (ta, tb)) in enumerate(tspans)
         ta, tb = minmax(Float64(ta), Float64(tb))
         x1 = clamp(searchsortedfirst(t_sng, ta) - pad, 1, ntime)
         x2 = clamp(searchsortedlast(t_sng, tb) + pad, x1, ntime)
+
+        if perbox
+            y1, y2 = band_bins(box_freqs[i]...)
+            Ry = _resample_weights(y2 - y1 + 1, max(1, round(Int, (y2 - y1 + 1) * px_per_bin)))
+        else
+            (y1, y2), Ry = fixed_y, fixed_R
+        end
 
         src = clamp.(Float32.(@view fout[y1:y2, x1:x2]), 0f0, srf) ./ srf
         reverse!(src, dims=1)                         # 위 = 고주파 (GUI 와 같음)

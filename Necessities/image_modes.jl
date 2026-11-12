@@ -13,18 +13,18 @@ using Printf
 
 # style = :none (저장 안 함) | :gui (export_usv_images_gui) | :legacy128 (export_usv_jpegs_lowcut)
 #   canvas_px = nothing → 저장 시점의 실제 spectrogram 창 크기 (창이 없으면 DEFAULT_CANVAS_PX)
-#   band      = nothing → 전체 대역
+#   band      = :box → 각 box 자신의 주파수 범위 (선택한 box 그대로), nothing → 전체 대역, (lo, hi) Hz → 고정 대역
 const DEFAULT_CANVAS_PX = (1600, 500)
 
 const IMAGE_MODES = [
     (; name="lite", style=:none,
        desc="no images: Save writes the .jld only (fast)"),
     (; name="gui", style=:gui, timescale=1.5, canvas_px=nothing,
-       band=(30_000.0, 125_000.0), pad_ms=0.0, ext="png",
-       desc="as seen in the GUI at timescale 1.5 s, current window size, 30-125 kHz, PNG"),
+       band=:box, pad_ms=0.0, ext="png",
+       desc="exactly the selected box (its time and frequency range), as seen in the GUI at timescale 1.5 s, current window size, PNG"),
     (; name="fixed", style=:gui, timescale=1.5, canvas_px=DEFAULT_CANVAS_PX,
-       band=(30_000.0, 125_000.0), pad_ms=0.0, ext="png",
-       desc="like gui, but a fixed 1600x500 reference window: same pixel scale every session (datasets)"),
+       band=:box, pad_ms=0.0, ext="png",
+       desc="like gui (exact box), but a fixed 1600x500 reference window: same pixel scale every session (datasets)"),
     (; name="fullband", style=:gui, timescale=1.5, canvas_px=DEFAULT_CANVAS_PX,
        band=nothing, pad_ms=0.0, ext="png",
        desc="like fixed, but the full frequency band (0 Hz - Nyquist)"),
@@ -179,7 +179,9 @@ function run_image_export(cfg, nmjld::AbstractString, spec, boxes;
         "px_per_second" => px[1] / cfg.timescale,
         "px_per_time_column" => px[1] * dt / cfg.timescale,
         "px_per_freq_bin" => px[2] / nfreq,
-        "band_hz" => cfg.band === nothing ? "full (0-Nyquist)" : @sprintf("%.0f-%.0f", cfg.band[1], cfg.band[2]),
+        "band_hz" => cfg.band === nothing ? "full (0-Nyquist)" :
+                     cfg.band === :box ? "box (each image = that box's own frequency range; see img_f_lo_hz / img_f_hi_hz)" :
+                     @sprintf("%.0f-%.0f", cfg.band[1], cfg.band[2]),
         "contrast" => "clamp(power, 0, sr) / sr  (same as GUI), sr = $(sr)",
         "resampling" => "area average when shrinking, bilinear when enlarging",
         "frequency_orientation" => "top row = highest frequency",

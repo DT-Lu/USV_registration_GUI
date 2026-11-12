@@ -122,7 +122,7 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `-m`, `--mode NAME` | image mode for Save (see below). Omit to choose in a dialog at startup. |
 | `--timescale S` | reference GUI timescale in seconds (gui-style modes) |
 | `--canvas WxH` | reference window size, e.g. `1600x500`, or `live` |
-| `--band LO-HI` | image band in kHz, e.g. `30-125`, or `full` |
+| `--band B` | image frequency range: `box` (each box's own range), `full`, or LO-HI in kHz, e.g. `30-125` |
 | `--pad-ms MS` | time padding on each side of a box |
 | `--format FMT` | `png` or `jpeg` |
 | `--export-only` | no GUI: write images + `metadata.txt` for a `.jld` and exit (needs `--mode`) |
@@ -295,19 +295,20 @@ What Save writes besides the `.jld` depends on the **image mode**. Choose it wit
 | Mode | Output |
 |---|---|
 | `lite` | nothing (only the `.jld`; fastest) |
-| `gui` | each box as seen in the GUI at timescale 1.5 s, **current window size**, 30–125 kHz, PNG |
-| `fixed` | like `gui`, but with a fixed 1600×500 reference window, so the pixel scale is the same every session (recommended for datasets) |
-| `fullband` | like `fixed`, full frequency band |
+| `gui` | **exactly the selected box** (its own time and frequency range), as seen in the GUI at timescale 1.5 s, **current window size**, PNG |
+| `fixed` | like `gui` (exact box), but with a fixed 1600×500 reference window, so the pixel scale is the same every session (recommended for datasets) |
+| `fullband` | like `fixed`, but the full frequency band (box time range only) |
 | `legacy128` | the old 128×128 stretched JPEG (30–125 kHz, percentile contrast) → `_jpegs/` |
 
 `--timescale`, `--canvas`, `--band`, `--pad-ms` and `--format` override the preset (gui-style modes). To add a mode, add one line to `IMAGE_MODES` in `Necessities/image_modes.jl`.
 
 How gui-style images are built:
 
-* Images look like the GUI spectrogram at the reference timescale, not squashed to 128 × 128. Each image's size follows the call's duration and band.
+* Images look like the GUI spectrogram at the reference timescale, not squashed to 128 × 128. Each image's size follows the box's duration and frequency range.
   * width = columns × canvas_width × dt / timescale
   * height = bins × canvas_height / nfreq
 * Contrast is the same as the GUI, `clamp(fout, 0, sngscale) / sngscale`, using the slider value at save time.
+* `gui` / `fixed`: the image spans exactly the box's frequency bins (`img_f_lo_hz` / `img_f_hi_hz` in `metadata.txt`), so its height differs from box to box.
 * The top row of the image is the highest frequency.
 
 ```text
