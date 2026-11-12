@@ -73,7 +73,7 @@ The standard libraries `Dates`, `Printf`, `Random`, `SparseArrays` and `Statisti
 ```bash
 git clone https://github.com/NeuroParkUSVregistrators/USV_registration_GUI.git
 cd USV_registration_GUI
-git checkout temp9
+git checkout 10
 ```
 
 Then, in Julia started from that directory:
