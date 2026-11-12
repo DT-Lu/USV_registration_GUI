@@ -1,7 +1,7 @@
 # USV Registration GUI
 NEWLY NAMED: "JWI-EAK"
 
-A Julia/Gtk graphical interface for **registering and inspecting mouse ultrasonic vocalizations (USVs)** in WaveSurfer `.h5` recordings.
+A Julia/GTK 4 graphical interface for **registering and inspecting mouse ultrasonic vocalizations (USVs)** in WaveSurfer `.h5` recordings.
 
 `Jwi-eak.jl` is the current version of the GUI. On top of manual box annotation, it adds a one-click **automatic USV detection** pipeline (SDTS denoising → time-axis detection → ridge/harmonic frequency bounds) whose results load straight into the editor for review and correction.
 
@@ -30,7 +30,7 @@ USV_registration_GUI/
 ├── Jwi-eak.jl                         ← current GUI (this README)
 ├── temp8.jl, temp7.3.jl, temp7.2.jl ← earlier versions
 ├── jwi-eak.sh / jwi-eak.bat         ← command-line launchers
-├── usv.glade                        ← Gtk layout (window, buttons, panels)
+├── usv.ui                           ← GTK 4 layout (window, buttons, panels)
 ├── Project.toml / Manifest.toml     ← Julia environment
 │
 ├── Necessities/
@@ -54,11 +54,12 @@ Jwi-eak.jl loads only the files listed above from `Necessities/`.
 
 ## Requirements
 
-* Julia (developed and tested primarily on **Windows**)
+* Julia ≥ 1.10 (developed and tested primarily on **Windows**)
+* **GTK 4** through [Gtk4.jl](https://github.com/JuliaGtk/Gtk4.jl) (0.7) and GtkObservables 2. GTK itself comes as a Julia artifact, so nothing is installed system-wide.
 * Packages declared in `Project.toml`:
 
 ```text
-Gtk  GtkObservables  Graphics  Colors  Cairo  CairoMakie
+Gtk4  GtkObservables  Graphics  Colors  Cairo  CairoMakie
 JLD  HDF5  FFTW  DSP  Distributions  LinearAlgebra
 Images  ImageTransformations  ImageMagick  FileIO  Interpolations
 ```
@@ -82,6 +83,25 @@ using Pkg
 Pkg.activate(".")
 Pkg.instantiate()
 ```
+
+#### Moving an existing checkout from GTK 3 to GTK 4
+
+The `Gtk4` branch replaces `Gtk` (GTK 3) with `Gtk4` and needs GtkObservables 2. After switching branches, update the environment once:
+
+```bash
+julia --project=. -e "using Pkg; Pkg.resolve(); Pkg.instantiate()"
+```
+
+`Gtk` and `Gtk4` cannot be loaded in the same Julia session, so restart Julia if `Gtk` was loaded earlier. If `Jwi-eak.jl` is started before this step, it prints the command above and exits.
+
+#### What changed with GTK 4
+
+* **Layout:** `usv.glade` became `usv.ui`, in GTK 4 format (validated with `gtk4-builder-tool`). Glade cannot edit GTK 4 files; use [Cambalache](https://gitlab.gnome.org/jpu/cambalache) or edit the XML. The layout and widget IDs are the same.
+* **Dialogs:** the startup mode dialog and the file dialogs are now GTK 4 dialogs.
+* **Shortcuts:** they work no matter which widget was clicked last; there's no need to click the window first.
+* **Mouse wheel:** zoom works over the spectrogram and air-flow panels and on empty areas, and sliders still scroll themselves.
+* **Window size:** GTK 4's default theme draws larger widgets, so the smallest possible window is about 1800×1360 px (GTK 3: about 1650×1250).
+
 
 ---
 

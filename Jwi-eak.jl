@@ -2,8 +2,19 @@ using Pkg
 Pkg.activate(@__DIR__)   # 어느 폴더에서 실행해도 이 repository 의 환경 사용
 #Pkg.precompile()
 
-using Gtk.ShortNames, GtkObservables, Graphics, Colors, CairoMakie, Cairo
-using Gtk.GLib
+# Gtk4 가 설치되지 않은 (Gtk3 시절) 환경이면 안내 후 종료
+if Base.find_package("Gtk4") === nothing || Base.find_package("GtkObservables") === nothing
+    println(stderr, """
+    Gtk4 / GtkObservables 2 are not installed in this environment yet.
+    Run once in the repository folder:
+
+        julia --project=. -e "using Pkg; Pkg.resolve(); Pkg.instantiate()"
+    """)
+    isinteractive() ? error("Gtk4 not installed") : exit(1)
+end
+
+using Gtk4, GtkObservables, Graphics, Colors, CairoMakie, Cairo
+using Gtk4.GLib
 using JLD
 using HDF5
 using FFTW
@@ -11,14 +22,34 @@ using DSP
 using LinearAlgebra
 using Random, Distributions
 using Dates
-using Gtk
 using Base.Filesystem: basename
 
 const Axis = CairoMakie.Axis
-const KEY_PRESS_MASK = 1 << 10
-const BUTTON_PRESS_MASK = 1 << 8
-const SCROLL_MASK = 1 << 21
-const CONTROL_MASK = 1 << 2
+
+# --- GTK4 helpers ---------------------------------------------------
+# GTK4: 이벤트 mask 없음 → event controller. 수정자 키는 BitFlags (ModifierType).
+_hasmod(state, flag) = (Gtk4.ModifierType(state & Gtk4.MODIFIER_MASK) & flag) == flag
+_ctrl(state)  = _hasmod(state, Gtk4.ModifierType_CONTROL_MASK)
+_shift(state) = _hasmod(state, Gtk4.ModifierType_SHIFT_MASK)
+_alt(state)   = _hasmod(state, Gtk4.ModifierType_ALT_MASK)
+_plain(state) = !(_ctrl(state) || _shift(state) || _alt(state))
+
+set_text!(lbl, s) = (lbl.label = string(s); nothing)          # GtkLabel (GAccessor.text 대체)
+set_title!(win, s) = (win.title = string(s); nothing)         # GtkWindow (GAccessor.title 대체)
+
+# 컨트롤러가 자식 위젯보다 먼저 이벤트를 받도록 (GtkObservables canvas 가 scroll 을 먹기 때문)
+function _capture_phase!(ec)
+    try
+        ec.propagation_phase = Gtk4.PropagationPhase_CAPTURE
+    catch
+        try
+            Gtk4.G_.set_propagation_phase(ec, Gtk4.PropagationPhase_CAPTURE)
+        catch e
+            @warn "could not set capture phase" exception = e
+        end
+    end
+    return ec
+end
 
 idle_add_compat(f::Function) = g_idle_add(f)
 timeout_add_compat(f::Function, ms::Integer) = g_timeout_add(f, ms)
@@ -56,8 +87,8 @@ function safe_cb(tag::AbstractString, f::Function)
         bt = catch_backtrace()
         @error "GTK callback failed: $tag" exception = (e, bt)
         try
-            if isdefined(Main, :win) && win isa Gtk.Window
-                Gtk.GAccessor.title(win, "ERROR: $tag - Check console")
+            if isdefined(Main, :win) && win isa GtkWindow
+                set_title!(win, "ERROR: $tag - Check console")
             end
         catch
         end
@@ -135,16 +166,57 @@ function export_jpegs_after_save(nmjld::AbstractString;
     return outdir
 end
 
+# GUI 시작 (GTK4: dialog 가 비동기라 callback 으로 이어짐)
+#   mode dialog (image_cfg 가 없을 때) → file dialog (file 이 없을 때) → build_gui
 # file      : 열 파일 (.h5/.jld). nothing → file dialog
 # image_cfg : image_mode_config(...) 결과. nothing → 시작할 때 dialog 로 선택
 # overrides : --timescale 등 CLI 값 (dialog 로 고른 모드에도 적용)
+# 창이 끝내 안 만들어지면 (취소/오류) GUI_CLOSED 를 notify → 명령행 실행이 끝남
 function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothing,
                   overrides::NamedTuple=(;))
+    function start(cfg)
+        println("Image mode: ", cfg.name, "  (", cfg.desc, ")")
+        if file !== nothing
+            build_gui(String(file), cfg) === nothing && notify(GUI_CLOSED)
+            return nothing
+        end
+        open_dialog("Pick a .h5 recording or .jld annotation") do nm
+            try
+                if nm === nothing || isempty(nm)
+                    println("No file chosen.")
+                    notify(GUI_CLOSED)
+                else
+                    build_gui(String(nm), cfg) === nothing && notify(GUI_CLOSED)
+                end
+            catch e
+                @error "GUI start failed" exception = (e, catch_backtrace())
+                notify(GUI_CLOSED)
+            end
+        end
+        return nothing
+    end
+
+    if image_cfg === nothing
+        choose_image_mode() do name
+            try
+                start(image_mode_config(name; overrides=overrides))
+            catch e
+                @error "GUI start failed" exception = (e, catch_backtrace())
+                notify(GUI_CLOSED)
+            end
+        end
+    else
+        start(image_cfg)
+    end
+    return nothing
+end
+
+# 파일 nm 을 열어 main window 를 만듦. 반환: window (실패하면 nothing)
+function build_gui(nm::AbstractString, cfg)
     try
         nm_ref = Ref{String}("")
         dirty_ref = Ref(false)
-        image_mode = Ref{Any}(image_cfg === nothing ? image_mode_config(choose_image_mode(); overrides=overrides) : image_cfg)
-        println("Image mode: ", image_mode[].name, "  (", image_mode[].desc, ")")
+        image_mode = Ref{Any}(cfg)
 
         spec_obs = Observable{Any}(nothing)
         fout_obs = Observable{Matrix{Float64}}(zeros(1, 1))
@@ -159,7 +231,7 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
         )
             file_label = isempty(filename) ? "USV Manual" : basename(filename)
             file_label = string(file_label, "  [", image_mode[].name, "]")
-            Gtk.GAccessor.title(win, dirty ? "$(file_label) *" : file_label)
+            set_title!(win, dirty ? "$(file_label) *" : file_label)
             return nothing
         end
 
@@ -186,13 +258,11 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
             return nothing
         end
 
-        # open a file 
-        nm = file === nothing ? open_dialog("Pick a file") : String(file)
-        (nm === nothing || isempty(nm)) && return nothing
+        # open the file 
         load_into_gui!(nm)
 
-        # glade 
-        b = Gtk.Builder(filename=joinpath(@__DIR__, "usv.glade"))
+        # GTK4 UI definition 
+        b = GtkBuilder(joinpath(@__DIR__, "usv.ui"))
 
         # whole window 
         win = b["win"]
@@ -211,12 +281,19 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
 
         function prevent_focus_on_click!(x)
             w = unwrap_widget(x)
+            # GTK4: focusable = 위젯 자신, can-focus = 자식(예: spinbutton 안의 text)까지.
+            #   GTK3 처럼 slider/spinbutton 이 키 입력을 가져가지 않게 둘 다 끔
+            #   (window 의 CAPTURE 단축키가 spinbutton 타이핑 중 BackSpace 를 "box 삭제" 로 먹지 않도록).
             try
-                Gtk.set_gtk_property!(w, :can_focus, false)
+                w.focusable = false
             catch
             end
             try
-                Gtk.set_gtk_property!(w, Symbol("focus-on-click"), false)
+                w.can_focus = false
+            catch
+            end
+            try
+                w.focus_on_click = false
             catch
             end
             return nothing
@@ -366,7 +443,10 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
 
         # multiple 
         usvparambox = b["usvparambox"]
-        usvcanvas = Gtk.Canvas()
+        usvcanvas = GtkCanvas()
+        # GTK4: box 안의 canvas 는 expand 를 켜야 보임
+        Gtk4.hexpand(usvcanvas, true)
+        Gtk4.vexpand(usvcanvas, true)
         push!(usvparambox, usvcanvas)
 
         gui_idle("initial hist") do
@@ -444,43 +524,26 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
         # 2026-02-19 focus policy: 
         # - 키/휠 단축 입력은 win에서 전역 처리 
         # - sngcanvas는 마우스 드래그/그리기만 담당하므로 포커스를 갖지 않게 함 
-        sngw = getfield(sngcanvas, :widget)
-        try
-            Gtk.set_gtk_property!(sngw, :can_focus, false)
-            Gtk.set_gtk_property!(sngw, Symbol("focus-on-click"), false)
-        catch
-        end
+        sngw = widget(sngcanvas)
+        prevent_focus_on_click!(sngw)
 
-
-        Gtk.set_gtk_property!(win, :can_focus, true)
-        Gtk.add_events(win,
-            KEY_PRESS_MASK |
-                SCROLL_MASK |
-                BUTTON_PRESS_MASK
-        )
-
-        # 창 안을 클릭하면 win으로 포커스를 되돌림 
-        signal_connect(win, "button-press-event") do _, _
-            Gtk.grab_focus(win)
-            return false
-        end
-
-        # 처음부터 win 포커스 
-        gui_idle("initial win focus") do
-            try
-                Gtk.present(win)
-            catch
-            end
-            Gtk.grab_focus(win)
-        end
-
-        # (중요) sngw에는 키/휠 이벤트 마스크를 추가하지 않음 
+        # GTK4: 키/휠은 window 의 event controller 가 CAPTURE 단계에서 먼저 받음
+        #   → 어느 위젯에 포커스가 있어도 단축키가 동작 (GTK3 의 "클릭하면 win 으로 포커스" 불필요)
 
         function do_load() # 2026-03-04 added feature 
             safe_cb("load clicked") do
-                newnm = open_dialog("Pick a file")
-                (newnm === nothing || newnm == "") && return
+                # GTK4: dialog 는 비동기 → 나머지는 callback 안에서
+                open_dialog("Pick a .h5 recording or .jld annotation", win) do newnm
+                    (newnm === nothing || newnm == "") && return
+                    safe_cb("load file") do
+                        load_after_dialog!(newnm)
+                    end
+                end
+            end
+        end
 
+        function load_after_dialog!(newnm::AbstractString)
+            begin
                 load_into_gui!(newnm)
 
                 # reset 
@@ -500,8 +563,8 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
 
                 currtime[] = t_sng_obs[][ts]
 
-                Gtk.GAccessor.text(timestartlabel, "$(t_sng_obs[][ts]) sec ")
-                Gtk.GAccessor.text(timeendlabel, "$(t_sng_obs[][ts] + tw) sec ")
+                set_text!(timestartlabel, "$(t_sng_obs[][ts]) sec ")
+                set_text!(timeendlabel, "$(t_sng_obs[][ts] + tw) sec ")
 
                 obsimg[] = update_sng(fout_obs[], ts, tw, sngscale.observable[]; dt_sng=dt_sng_obs[])
 
@@ -614,7 +677,7 @@ end
         function export_images_after_save(nmjld::AbstractString, lns)
             spec = spec_obs[]
             spec === nothing && return nothing
-            w, h = Gtk.width(sngw), Gtk.height(sngw)
+            w, h = width(sngw), height(sngw)
             live = (w > 1 && h > 1) ? (Int(w), Int(h)) : nothing
             return run_image_export(image_mode[], nmjld, spec, liness_to_boxes(lns, spec);
                                     sr=float(sngscale.observable[]), channel=choice,
@@ -664,11 +727,10 @@ end
             end
         end
 
-        Gtk.add_events(win, KEY_PRESS_MASK)
-        signal_connect(win, "key-press-event") do _, event
-            key = event.keyval
-            state = event.state
-            ctrl = (state & CONTROL_MASK) != 0
+        eck = _capture_phase!(GtkEventControllerKey(win))
+        signal_connect(eck, "key-pressed") do controller, keyval, keycode, state
+            key = keyval
+            ctrl = _ctrl(state)
 
             # Ctrl+Z == delete (또는 Delete/BackSpace) 
             if (ctrl && (key == GDK_KEY_z || key == GDK_KEY_Z)) ||
@@ -728,9 +790,7 @@ end
             end
         end
 
-        Gtk.add_events(win, SCROLL_MASK)
-        signal_connect(win, "scroll-event") do _, event
-            dy = getfield(event, :delta_y)
+        function on_wheel(dy)
             if dy > 0 # scroll donw = expand 
                 zoom_timescale!(1 / 1.15)
                 return true
@@ -739,6 +799,18 @@ end
                 return true
             end
             return false
+        end
+        # 창의 빈 곳 (bubble 단계: slider 는 자기 스크롤을 먼저 처리, GTK3 와 같음)
+        ecs = GtkEventControllerScroll(Gtk4.EventControllerScrollFlags_VERTICAL, win)
+        signal_connect(ecs, "scroll") do controller, dx, dy
+            on_wheel(dy)
+        end
+        # spectrogram / air canvas: GtkObservables 의 scroll handler 가 이벤트를 소비하므로 CAPTURE 로 먼저
+        for cw in (sngw, widget(aircanvas))
+            ecc = _capture_phase!(GtkEventControllerScroll(Gtk4.EventControllerScrollFlags_VERTICAL, cw))
+            signal_connect(ecc, "scroll") do controller, dx, dy
+                on_wheel(dy)
+            end
         end
 
 
@@ -759,8 +831,8 @@ end
                     ts = clamp(timestart, 1, maxstart)
 
                     currtime[] = t_sng_obs[][ts]
-                    Gtk.GAccessor.text(timestartlabel, "$(t_sng_obs[][ts]) sec ")
-                    Gtk.GAccessor.text(timeendlabel, "$(t_sng_obs[][ts] + timewidth) sec ")
+                    set_text!(timestartlabel, "$(t_sng_obs[][ts]) sec ")
+                    set_text!(timeendlabel, "$(t_sng_obs[][ts] + timewidth) sec ")
 
                     # plot 
                     obsimg[] = update_sng(fout_obs[], ts, timewidth, sngrange; dt_sng=dt_sng_obs[])
@@ -811,7 +883,7 @@ end
 
         onany(usvboxind, obs) do current, total
             gui_idle("usvboxind/obs changed") do
-                Gtk.GAccessor.text(currentusvindex, "Current / total:\n $(current) / $(total) ")
+                set_text!(currentusvindex, "Current / total:\n $(current) / $(total) ")
 
                 if isempty(liness[]) || current < 1 || current > length(liness[])
                     return
@@ -833,12 +905,12 @@ end
                     spur = round(spur, sigdigits=3)
                     smeanF = Int(round(smeanF / 1000))
                     spitchV = Int(round(spitchV))
-                    Gtk.GAccessor.text(currentusvdur, "$(sdur)ms ")
-                    Gtk.GAccessor.text(currentusvamp, "$(sdB)dB ")
-                    Gtk.GAccessor.text(currentusvspur, "$(spur) ")
+                    set_text!(currentusvdur, "$(sdur)ms ")
+                    set_text!(currentusvamp, "$(sdB)dB ")
+                    set_text!(currentusvspur, "$(spur) ")
 
-                    Gtk.GAccessor.text(currentusvpitch, "$(smeanF)kHz ")
-                    Gtk.GAccessor.text(currentusvpitchvariance, "$(spitchV) log₁₀Hz² ")
+                    set_text!(currentusvpitch, "$(smeanF)kHz ")
+                    set_text!(currentusvpitchvariance, "$(spitchV) log₁₀Hz² ")
                 end
 
                 if cctime < currtime[] || cctime > currtime[] + timescale.observable[]
@@ -862,12 +934,12 @@ end
         sigstart = on(sngcanvas.mouse.buttonpress) do btn
             try
                 safe_cb("mouse buttonpress") do
-                    if btn.button == 1 && btn.modifiers == 0
+                    if btn.button == 1 && _plain(btn.modifiers)
                         drawing[] = true   # start extending the line 
                         newline[][1] = btn.position
                     end
 
-                    if btn.button == 1 && btn.modifiers == 1
+                    if btn.button == 1 && _shift(btn.modifiers) && !_ctrl(btn.modifiers) && !_alt(btn.modifiers)
                         click_pivot[] = [unit_to_time(btn.position, currtime[], timescale.observable[])]
 
                         flag, id = checkmoving(btn, currtime, liness, timescale)
@@ -969,7 +1041,7 @@ end
         # Draw on the canvas 
         redraw = draw(sngcanvas, liness, newline, obsimg, usvboxind) do cnvs, lns, newl, imgss, ubi
             try
-                w, h = Gtk.width(cnvs), Gtk.height(cnvs)
+                w, h = width(cnvs), height(cnvs)
                 (w <= 1 || h <= 1) && return
 
                 fill!(cnvs, colorant"white")   # background is white 
@@ -1033,11 +1105,12 @@ end
             return nothing
         end
 
-        signal_connect(win, :destroy) do _
+        signal_connect(win, :close_request) do _
             notify(GUI_CLOSED)
+            return false          # false = 창 닫기 허용
         end
-        Gtk.showall(win)
         update_window_title!(win, nm_ref[]; dirty=dirty_ref[])
+        present(win)              # GTK4: showall 없음 (위젯은 기본으로 보임)
         return win
     catch e
         @error "GUI initialization crashed BEFORE setup" exception = (e, catch_backtrace())
@@ -1062,11 +1135,11 @@ end
 
 function drawonto(canvas, figure)
     try
-        w = Gtk.width(canvas)
-        h = Gtk.height(canvas)
+        w = width(canvas)
+        h = height(canvas)
         (w <= 1 || h <= 1) && return
 
-        surf = Gtk.cairo_surface(canvas)
+        surf = Gtk4.cairo_surface(canvas)
         surf === nothing && return
 
         #@guarded draw(canvas) do _ 
@@ -1380,13 +1453,15 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
         return export_only_run(opts.file, cfg; sr=opts.sr, channel=opts.channel)
     end
 
-    win = @time make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides)
+    # GTK4: REPL 에서는 GLib main loop 가 자동으로 돌지만, 명령행 실행에서는 직접 시작해야 함.
+    #       dialog 가 비동기라 loop 를 먼저 띄운 뒤 GUI 를 시작.
+    script = !isinteractive()
+    script && Gtk4.GLib.start_main_loop()
 
-    # 명령행 실행: 창이 닫힐 때까지 julia 가 끝나지 않게 기다림
-    if win !== nothing && !isinteractive()
-        if !(isdefined(Gtk, :is_eventloop_running) && Gtk.is_eventloop_running())
-            @async Gtk.gtk_main()
-        end
+    make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides)
+
+    # 명령행 실행: 창이 닫히거나 (dialog 취소 / 시작 실패 포함) 할 때까지 기다림
+    if script
         wait(GUI_CLOSED)
         println("Window closed.")
     end

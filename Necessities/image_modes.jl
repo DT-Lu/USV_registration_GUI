@@ -59,27 +59,34 @@ function describe_image_modes(io::IO=stdout)
 end
 
 # --- 시작 시 모드 선택 ------------------------------------------------
-# GUI dialog (버튼 = 모드). 실패하면 terminal, 그것도 안 되면 "lite".
-function choose_image_mode()
+# GTK4 alert dialog (버튼 = 모드, 비동기). 고른 모드 이름으로 callback(name) 호출.
+#   Esc / 창 닫기 → "lite". dialog 를 못 띄우면 terminal 에서 물어봄.
+#   (Gtk4.ask_dialog 와 같은 방식: GtkAlertDialog + set_buttons + choose)
+function choose_image_mode(callback::Function; parent=nothing)
     names = image_mode_names()
-    msg = "Image mode for this session\n(what Save writes besides the .jld)\n\n" *
-          join(["• $(m.name): $(m.desc)" for m in IMAGE_MODES], "\n") *
-          "\n\nTip: skip this dialog with  --mode <name>"
+    detail = "What Save writes besides the .jld:\n\n" *
+             join(["• $(m.name): $(m.desc)" for m in IMAGE_MODES], "\n") *
+             "\n\nTip: skip this dialog with  --mode <name>"
     try
-        buttons = Tuple((n, i) for (i, n) in enumerate(names))   # (label, response id)
-        # flags 2 = DESTROY_WITH_PARENT, type 2 = QUESTION (Gtk.ask_dialog 과 같은 생성자)
-        dlg = Gtk.GtkMessageDialog(msg, buttons, 2, 2, Gtk.GtkNullContainer())
-        r = Gtk.run(dlg)
-        Gtk.destroy(dlg)
-        if 1 <= r <= length(names)
-            return names[r]
+        dlg = Gtk4.GtkAlertDialog("Image mode for this session"; modal=true)
+        Gtk4.G_.set_detail(dlg, detail)
+        Gtk4.G_.set_buttons(dlg, names)
+        Gtk4.choose(dlg, parent) do d, resobj
+            idx = try
+                Gtk4.choose_finish(d, resobj)          # 0-based 버튼 번호
+            catch e
+                e isa Gtk4.GLib.GErrorException || rethrow()
+                -1                                     # Esc / 닫기
+            end
+            name = 0 <= idx < length(names) ? names[idx+1] : "lite"
+            idx < 0 && println("Mode dialog closed without a choice -> lite")
+            callback(name)
         end
-        println("Mode dialog closed without a choice -> lite")
-        return "lite"
     catch e
         @warn "mode dialog failed; asking in the terminal" exception = (e, catch_backtrace())
-        return choose_image_mode_terminal()
+        callback(choose_image_mode_terminal())
     end
+    return nothing
 end
 
 function choose_image_mode_terminal()
