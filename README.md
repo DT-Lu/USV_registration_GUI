@@ -13,7 +13,8 @@ A Julia/Gtk graphical interface for **registering and inspecting mouse ultrasoni
 * Manually draw, move, resize and delete USV bounding boxes
 * Per-USV close-up view with acoustic features
 * Population histograms of acoustic features
-* Save annotations as `.jld`, optionally exporting each USV as an image at the resolution seen in the GUI (chosen at startup: **Save images** or **Lite**)
+* Save annotations as `.jld`, optionally exporting each USV as an image (image modes: `lite`, `gui`, `fixed`, `fullband`, `legacy128`) with a `metadata.txt`
+* Command-line launch with options (`--help`), including a no-GUI `--export-only`
 * Window title shows the current file and an unsaved-changes marker (`*`)
 * Keyboard and mouse-wheel navigation
 
@@ -28,6 +29,7 @@ USV_registration_GUI/
 │
 ├── Jwi-eak.jl                         ← current GUI (this README)
 ├── temp8.jl, temp7.3.jl, temp7.2.jl ← earlier versions
+├── jwi-eak.sh / jwi-eak.bat         ← command-line launchers
 ├── usv.glade                        ← Gtk layout (window, buttons, panels)
 ├── Project.toml / Manifest.toml     ← Julia environment
 │
@@ -37,7 +39,9 @@ USV_registration_GUI/
 │   ├── gui_function_temp2.jl        ← file loading, coordinate conversion, features
 │   ├── GUItype_temp2.jl             ← USVBox type for saving annotations
 │   ├── GDK_KEYmap.jl                ← key constants
-│   ├── JPEGsaver_function_temp.jl   ← per-USV JPEG export
+│   ├── JPEGsaver_function_temp.jl   ← per-USV image export
+│   ├── image_modes.jl               ← image modes, startup chooser, metadata.txt
+│   ├── cli.jl                       ← command-line options
 │   ├── usv_detection_3.jl           ← automatic detection pipeline
 │   └── sdts_filter.jl               ← SDTS transient-suppression filter
 │
@@ -81,37 +85,49 @@ Pkg.instantiate()
 
 ---
 
-## Running temp9.jl
+## Running
 
-**Start Julia in the repository folder.** temp9.jl calls `Pkg.activate(".")` itself and loads `usv.glade` and `Necessities/...` with relative paths, so it must be run with the repository as the working directory.
-
-```julia
-include("Jwi-eak.jl")
-```
-
-or from a terminal:
+### From the command line (recommended)
 
 ```bash
-julia Jwi-eak.jl
+julia --project=. -t auto Jwi-eak.jl [FILE] [options]
 ```
 
-> When running with `julia Jwi-eak.jl` from the command line, the script exits when it reaches the end. Running it with `include` from the REPL keeps the window open.
+The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-eak.bat` on Windows. Julia stays open until the window is closed.
 
-A file dialog opens. Choose:
+| Option | Meaning |
+|---|---|
+| `FILE` | `.h5` (new registration) or `.jld` (reopen; the matching `.h5` must be in the same folder). Omit for a file dialog. |
+| `-c`, `--channel N` | analog channel 1 or 2 (default 1) |
+| `-m`, `--mode NAME` | image mode for Save (see below). Omit to choose in a dialog at startup. |
+| `--timescale S` | reference GUI timescale in seconds (gui-style modes) |
+| `--canvas WxH` | reference window size, e.g. `1600x500`, or `live` |
+| `--band LO-HI` | image band in kHz, e.g. `30-125`, or `full` |
+| `--pad-ms MS` | time padding on each side of a box |
+| `--format FMT` | `png` or `jpeg` |
+| `--export-only` | no GUI: write images + `metadata.txt` for a `.jld` and exit (needs `--mode`) |
+| `--sr X` | contrast cap for `--export-only` (the GUI's sngscale value, default 0.5) |
+| `--list-modes`, `-h`, `--help` | print modes / help |
 
-| File | Use |
-| --- | --- |
-| `recording.h5` | Start a new registration |
-| `recording.jld` | Reopen a saved annotation (the matching `recording.h5` must sit in the same folder) |
+```bash
+julia --project=. -t auto Jwi-eak.jl rec_001.h5 --mode fixed
+```
 
-### Audio channel
+```bash
+julia --project=. -t auto Jwi-eak.jl rec_001.jld -c 2 --mode gui --timescale 1.0
+```
 
-temp9 reads **analog channel 1** (`anl[1]`) of the WaveSurfer file by default; this channel is used for the spectrogram, detection and JPEG export. To use another channel, edit the last lines of `Jwi-eak.jl`:
+```bash
+julia --project=. Jwi-eak.jl rec_001.jld --export-only --mode fullband --sr 0.3
+```
+
+`-t auto` lets the SDTS filter in automatic detection use all CPU cores.
+
+### From the REPL
 
 ```julia
-choice = 1            # set to 2 for anl[2]
-# channel_select()    # or uncomment this line: choice = channel_select() to be asked at startup
-@time make_gui()
+include("Jwi-eak.jl")                         # dialogs, as before
+main(["rec_001.h5", "--mode", "lite"])        # or with options
 ```
 
 ---
@@ -216,11 +232,11 @@ The selected USV can also be chosen with the slider/spin button in the single-US
 
 ## Window Title
 
-The title shows the loaded file, with `*` while there are unsaved changes:
+The title shows the loaded file and the image mode, with `*` while there are unsaved changes:
 
 ```text
-USV260801_001.h5      ← saved
-USV260801_001.h5 *    ← unsaved changes
+USV260801_001.h5  [fixed]      ← saved
+USV260801_001.h5  [fixed] *    ← unsaved changes
 ```
 
 If a callback fails, the title changes to `ERROR: <action> - Check console` and the details are printed in the Julia console.
@@ -249,41 +265,49 @@ d["liness"]   # Vector{USVBox}
 
 `.jld` files from earlier versions load in temp9; the y unit (ratio or frequency bin) is detected automatically.
 
-### Images (Save images mode)
+### Images (image modes)
 
-When the GUI starts, a dialog asks for the session mode:
+What Save writes besides the `.jld` depends on the **image mode**. Choose it with `--mode`, or in a dialog at startup. The mode is shown in the window title, e.g. `rec_001.h5  [fixed]`.
 
-* **Save images** — Save writes the `.jld` **and** one image per USV.
-* **Lite** — Save writes the `.jld` only.
+| Mode | Output |
+|---|---|
+| `lite` | nothing (only the `.jld`; fastest) |
+| `gui` | each box as seen in the GUI at timescale 1.5 s, **current window size**, 30–125 kHz, PNG |
+| `fixed` | like `gui`, but with a fixed 1600×500 reference window, so the pixel scale is the same every session (recommended for datasets) |
+| `fullband` | like `fixed`, full frequency band |
+| `legacy128` | the old 128×128 stretched JPEG (30–125 kHz, percentile contrast) → `_jpegs/` |
 
-The current mode is shown in the window title (`[Save images]` / `[Lite]`).
+`--timescale`, `--canvas`, `--band`, `--pad-ms` and `--format` override the preset (gui-style modes). To add a mode, add one line to `IMAGE_MODES` in `Necessities/image_modes.jl`.
+
+How gui-style images are built:
+
+* Images look like the GUI spectrogram at the reference timescale, not squashed to 128 × 128. Each image's size follows the call's duration and band.
+  * width = columns × canvas_width × dt / timescale
+  * height = bins × canvas_height / nfreq
+* Contrast is the same as the GUI, `clamp(fout, 0, sngscale) / sngscale`, using the slider value at save time.
+* The top row of the image is the highest frequency.
 
 ```text
 USV260801_001_images/
+  metadata.txt
   0001_12.3456-12.4012_gui.png
   0002_...
 ```
 
-* Images look like the GUI spectrogram does at **timescale 1.5 s**. They are not squashed to 128 × 128, so each image's size follows the call's duration and band.
-  * width = columns × canvas_width × dt / 1.5
-  * height = bins × canvas_height / nfreq
-* Contrast is the same as the GUI: `clamp(fout, 0, sngscale) / sngscale`, using the slider value at save time.
-* Frequency range is **30–125 kHz**; the time range is the box itself.
-* Format is lossless PNG.
-* Taken from the same channel as the GUI (`choice`)
+#### `metadata.txt`
 
-Settings (`Jwi-eak.jl`, can be changed from the REPL):
+Every export writes a `metadata.txt` in the image folder. It has two parts:
 
-```julia
-EXPORT_TIMESCALE[] = 1.5            # reference GUI timescale (s)
-EXPORT_CANVAS_PX[] = nothing        # nothing = current spectrogram window size; (1600, 500) = fixed
-EXPORT_BAND[]      = (30e3, 125e3)  # nothing = full band
-EXPORT_PAD_MS[]    = 0.0            # time padding on each side
-EXPORT_EXT[]       = "png"          # or "jpeg"
+* `# key: value` header lines: date, source files, channel, mode, STFT parameters (fs, nfft, hop, dt, df), canvas size and where it came from, px per second / column / bin, band, contrast (`sr`), padding and format.
+* A tab-separated table, one row per image: `index, file, t_start_s, t_end_s, duration_ms, col_start, col_end, box_f_lo_hz, box_f_hi_hz, img_f_lo_hz, img_f_hi_hz, width_px, height_px`. `legacy128` has a shorter table.
+
+```python
+pd.read_csv("metadata.txt", sep="\t", comment="#")
 ```
 
-With `EXPORT_CANVAS_PX[] = nothing` the pixel scale depends on the window size at save time. For datasets that must share one scale, set a fixed size.
-The old 128 × 128 exporter (`export_jpegs_after_save`) is still available for manual use.
+```julia
+CSV.read("metadata.txt", DataFrame; delim='\t', comment="#")
+```
 
 These images are intended for image-based analyses such as dimensionality reduction, clustering, or neural-network models.
 

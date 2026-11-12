@@ -721,14 +721,19 @@ GUI 화면 그대로의 crop 이미지 저장. `tspans` = [(t_start, t_end), ...
 - `band`      : (f_lo, f_hi) Hz 세로 범위. `nothing` 이면 전체 대역
 - `pad_ms`    : 좌우 시간 여백
 - `ext`       : "png" (무손실, 기본) 또는 "jpeg"
+- `box_freqs` : [(f_lo, f_hi), ...] Hz (metadata 기록용, 선택)
+
+반환: 이미지별 NamedTuple 벡터 (metadata.txt 작성용)
 """
 function export_usv_images_gui(fout::AbstractMatrix{<:Real}, f::AbstractVector{<:Real},
                                t_sng::AbstractVector{<:Real}, tspans;
                                outdir::AbstractString, sr::Real,
                                timescale::Real=1.5, canvas_px::Tuple{Int,Int}=(1600, 500),
                                band::Union{Nothing,Tuple{<:Real,<:Real}}=(30_000.0, 125_000.0),
-                               pad_ms::Real=0.0, ext::AbstractString="png", quality::Int=95)
+                               pad_ms::Real=0.0, ext::AbstractString="png", quality::Int=95,
+                               box_freqs=nothing)
     mkpath(outdir)
+    rows = NamedTuple[]
     nfreq, ntime = size(fout)
     W, H = canvas_px
     dt = length(t_sng) >= 2 ? Float64(t_sng[2] - t_sng[1]) : 1.0
@@ -758,13 +763,21 @@ function export_usv_images_gui(fout::AbstractMatrix{<:Real}, f::AbstractVector{<
         nw = max(1, round(Int, (x2 - x1 + 1) * px_per_col))
         img = clamp.(Ry * src * transpose(_resample_weights(x2 - x1 + 1, nw)), 0f0, 1f0)
 
-        fname = joinpath(outdir, @sprintf("%04d_%.4f-%.4f_gui.%s", i, ta, tb, ext))
-        try
-            _save_gray(fname, img; quality=quality)
+        base = @sprintf("%04d_%.4f-%.4f_gui.%s", i, ta, tb, ext)
+        ok = try
+            _save_gray(joinpath(outdir, base), img; quality=quality)
+            true
         catch e
             @warn "image save failed: box $i" exception = (e, catch_backtrace())
+            false
         end
+        bf = box_freqs === nothing ? (NaN, NaN) : box_freqs[i]
+        push!(rows, (; index=i, file=ok ? base : "(failed)", t_start_s=ta, t_end_s=tb,
+                       duration_ms=1000 * (tb - ta), col_start=x1, col_end=x2,
+                       box_f_lo_hz=Float64(bf[1]), box_f_hi_hz=Float64(bf[2]),
+                       img_f_lo_hz=Float64(f[y1]), img_f_hi_hz=Float64(f[y2]),
+                       width_px=size(img, 2), height_px=size(img, 1)))
     end
     println("Image export finished.")
-    return outdir
+    return rows
 end

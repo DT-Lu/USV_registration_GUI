@@ -1,5 +1,5 @@
 using Pkg
-Pkg.activate(".")
+Pkg.activate(@__DIR__)   # 어느 폴더에서 실행해도 이 repository 의 환경 사용
 #Pkg.precompile()
 
 using Gtk.ShortNames, GtkObservables, Graphics, Colors, CairoMakie, Cairo
@@ -33,6 +33,8 @@ include("Necessities/GDK_KEYmap.jl")
 include("Necessities/JPEGsaver_function_temp.jl")
 include("Necessities/usv_detection_3.jl")
 include("Necessities/sdts_filter.jl")
+include("Necessities/image_modes.jl")
+include("Necessities/cli.jl")
 
 function gui_idle(tag::AbstractString, f::Function)
     idle_add_compat() do
@@ -83,31 +85,20 @@ function sanity_check_liness!(lns, tmax)
     @info "sanity_check" total = length(lns) bad = bad tmax = tmax
 end
 
-# ---- 이미지 저장 설정 (REPL 에서 바꿔가며 사용 가능) ----
-#   GUI 화면을 timescale = EXPORT_TIMESCALE 초로 볼 때의 해상도로 crop 저장.
-#   EXPORT_CANVAS_PX = nothing → 저장 시점의 실제 spectrogram 창 크기 사용
-#                     (W, H)   → 고정 크기 (창 크기와 무관하게 같은 픽셀 스케일; 학습 데이터용 권장)
-const EXPORT_TIMESCALE = Ref(1.5)
-const EXPORT_CANVAS_PX = Ref{Union{Nothing,Tuple{Int,Int}}}(nothing)
-const EXPORT_BAND      = Ref{Union{Nothing,Tuple{Float64,Float64}}}((30_000.0, 125_000.0))
-const EXPORT_PAD_MS    = Ref(0.0)
-const EXPORT_EXT       = Ref("png")      # "png" (무손실) | "jpeg"
-
-# 시작할 때 모드 선택: true = 저장 시 이미지도 export, false = Lite (.jld 만 저장)
-function choose_image_mode()
-    msg = "Save mode for this session\n\n" *
-          "• Save images: Save writes the .jld AND a cropped image of every USV\n" *
-          "   (as it looks in the GUI at timescale $(EXPORT_TIMESCALE[]) s).\n" *
-          "• Lite: Save writes the .jld only (fast, no images)."
-    mode = try
-        ask_dialog(msg, "Lite (no images)", "Save images")
-    catch e
-        @warn "mode dialog failed; using Lite mode" exception = (e, catch_backtrace())
-        false
+# GUI box (XY{UserUnit}) → (t1, t2, f_lo_hz, f_hi_hz). 이미지 export / metadata 용.
+function liness_to_boxes(lns, spec)
+    f = spec_freq_axis(spec)
+    nf = size(spec.fout, 1)
+    map(lns) do l
+        t1, t2 = minmax(Float64(l[1].x.val), Float64(l[2].x.val))
+        fa = Float64(f[userunit_to_freq_bin(Float64(l[1].y.val), nf)])
+        fb = Float64(f[userunit_to_freq_bin(Float64(l[2].y.val), nf)])
+        (t1, t2, min(fa, fb), max(fa, fb))
     end
-    println(mode ? "Mode: Save images" : "Mode: Lite (no image export)")
-    return mode
 end
+
+# GUI 창이 닫히면 notify (명령행 실행 시 julia 가 바로 끝나지 않도록 main 에서 wait)
+const GUI_CLOSED = Condition()
 
 function export_jpegs_after_save(nmjld::AbstractString;
     outdir::Union{Nothing,String}=nothing,
@@ -144,11 +135,16 @@ function export_jpegs_after_save(nmjld::AbstractString;
     return outdir
 end
 
-function make_gui()
+# file      : 열 파일 (.h5/.jld). nothing → file dialog
+# image_cfg : image_mode_config(...) 결과. nothing → 시작할 때 dialog 로 선택
+# overrides : --timescale 등 CLI 값 (dialog 로 고른 모드에도 적용)
+function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothing,
+                  overrides::NamedTuple=(;))
     try
         nm_ref = Ref{String}("")
         dirty_ref = Ref(false)
-        image_mode = Ref(choose_image_mode())   # 매번 GUI 를 열 때 선택
+        image_mode = Ref{Any}(image_cfg === nothing ? image_mode_config(choose_image_mode(); overrides=overrides) : image_cfg)
+        println("Image mode: ", image_mode[].name, "  (", image_mode[].desc, ")")
 
         spec_obs = Observable{Any}(nothing)
         fout_obs = Observable{Matrix{Float64}}(zeros(1, 1))
@@ -162,7 +158,7 @@ function make_gui()
             dirty::Bool=false,
         )
             file_label = isempty(filename) ? "USV Manual" : basename(filename)
-            file_label = string(file_label, image_mode[] ? "  [Save images]" : "  [Lite]")
+            file_label = string(file_label, "  [", image_mode[].name, "]")
             Gtk.GAccessor.title(win, dirty ? "$(file_label) *" : file_label)
             return nothing
         end
@@ -191,12 +187,12 @@ function make_gui()
         end
 
         # open a file 
-        nm = open_dialog("Pick a file")
+        nm = file === nothing ? open_dialog("Pick a file") : String(file)
         (nm === nothing || isempty(nm)) && return nothing
         load_into_gui!(nm)
 
         # glade 
-        b = Gtk.Builder(filename="usv.glade")
+        b = Gtk.Builder(filename=joinpath(@__DIR__, "usv.glade"))
 
         # whole window 
         win = b["win"]
@@ -607,40 +603,22 @@ end
                 pure = strip_gui_types(linesave)
                 JLD.save(nmjld, "liness", pure, "y_unit", "ratio")
 
-                if image_mode[]
-                    export_images_after_save(nmjld, linesave)
-                else
-                    println("Lite mode: image export skipped")
-                end
+                export_images_after_save(nmjld, linesave)
 
                 set_dirty!(false)
                 println("save is done: okay to close the window")
             end
         end
 
-        # GUI 화면 해상도 그대로 crop 이미지 저장 (Save images 모드)
+        # 현재 image mode 로 이미지 + metadata.txt 저장 (lite 면 아무것도 안 함)
         function export_images_after_save(nmjld::AbstractString, lns)
             spec = spec_obs[]
             spec === nothing && return nothing
-            dotloc = findlast('.', nmjld)
-            base = (dotloc === nothing) ? nmjld : nmjld[1:(dotloc-1)]
-            outdir = string(base, "_images")
-
-            px = EXPORT_CANVAS_PX[]
-            if px === nothing
-                w, h = Gtk.width(sngw), Gtk.height(sngw)
-                px = (w > 1 && h > 1) ? (Int(w), Int(h)) : (1600, 500)
-            end
-            tspans = [(Float64(l[1].x.val), Float64(l[2].x.val)) for l in lns]
-            export_usv_images_gui(spec.fout, spec_freq_axis(spec), t_sng_obs[], tspans;
-                outdir=outdir,
-                sr=float(sngscale.observable[]),
-                timescale=EXPORT_TIMESCALE[],
-                canvas_px=px,
-                band=EXPORT_BAND[],
-                pad_ms=EXPORT_PAD_MS[],
-                ext=EXPORT_EXT[])
-            return outdir
+            w, h = Gtk.width(sngw), Gtk.height(sngw)
+            live = (w > 1 && h > 1) ? (Int(w), Int(h)) : nothing
+            return run_image_export(image_mode[], nmjld, spec, liness_to_boxes(lns, spec);
+                                    sr=float(sngscale.observable[]), channel=choice,
+                                    live_canvas_px=live)
         end
 
         # delete button 
@@ -1055,9 +1033,12 @@ end
             return nothing
         end
 
+        signal_connect(win, :destroy) do _
+            notify(GUI_CLOSED)
+        end
         Gtk.showall(win)
         update_window_title!(win, nm_ref[]; dirty=dirty_ref[])
-        nothing
+        return win
     catch e
         @error "GUI initialization crashed BEFORE setup" exception = (e, catch_backtrace())
         println(stderr, "\n=== CRITICAL INIT ERROR ===\n")
@@ -1362,6 +1343,54 @@ function channel_select()
     return choice
 end
 
-choice = 1
-# channel_select() 
-@time make_gui()
+# ---------------------------------------------------------------------
+# 진입점: 명령행 / REPL 공통
+#   julia --project=. -t auto Jwi-eak.jl [FILE] [options]   (--help 참고)
+#   REPL: include("Jwi-eak.jl") → 예전처럼 dialog 로 시작
+#         main(["rec.h5", "--mode", "fixed"]) 처럼 옵션을 줘서 다시 열 수도 있음
+# ---------------------------------------------------------------------
+choice = 1   # analog channel (load / legacy export 에서 사용; --channel 로 설정)
+
+# GUI 없이 .jld 의 box 로 이미지 + metadata.txt 만 만들기
+function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int)
+    println("Export only: ", file, "  (mode ", cfg.name, ", channel ", channel, ")")
+    spec, lns_obs = load_file(String(file), channel)
+    lns = lns_obs isa Observable ? lns_obs[] : lns_obs
+    sequence_check!(lns)
+    return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec); sr=sr, channel=channel)
+end
+
+function main(args::AbstractVector{<:AbstractString}=ARGS)
+    opts = try
+        parse_cli(args)
+    catch e
+        e isa CLIError || rethrow()
+        println(stderr, "Error: ", e.msg, "\n")
+        print_cli_help(stderr)
+        isinteractive() || exit(2)
+        return nothing
+    end
+    opts.help && (print_cli_help(); return nothing)
+    opts.list_modes && (describe_image_modes(); return nothing)
+
+    global choice = opts.channel
+    cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
+
+    if opts.export_only
+        return export_only_run(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+    end
+
+    win = @time make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides)
+
+    # 명령행 실행: 창이 닫힐 때까지 julia 가 끝나지 않게 기다림
+    if win !== nothing && !isinteractive()
+        if !(isdefined(Gtk, :is_eventloop_running) && Gtk.is_eventloop_running())
+            @async Gtk.gtk_main()
+        end
+        wait(GUI_CLOSED)
+        println("Window closed.")
+    end
+    return nothing
+end
+
+main(ARGS)
