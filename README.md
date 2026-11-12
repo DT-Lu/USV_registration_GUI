@@ -228,6 +228,17 @@ The selected USV can also be chosen with the slider/spin button in the single-US
 
 > `Ctrl + Z` deletes the selected box; it is **not** undo.
 
+### Changing channel and image mode while the window is open
+
+Two dropdowns sit under the Load / Save / USV detection / Delete buttons:
+
+| Dropdown | Effect |
+| --- | --- |
+| **Channel 1 / Channel 2** | Recomputes the spectrogram from the other analog channel of the same `.h5`. **Boxes are kept**, including unsaved ones, because they are stored as time and frequency. If the file has no such channel, the GUI stays on the current channel and prints an error. |
+| **Images: lite / gui / fixed / fullband / legacy128** | Image mode for the **next Save**. `--timescale`, `--canvas`, `--band`, `--pad-ms` and `--format` from the command line still apply to the gui-style modes. |
+
+The startup values come from `--channel` / `--mode` (or the startup dialog). A file opened with **Load** uses the current channel and mode.
+
 ---
 
 ## Window Title
@@ -235,8 +246,8 @@ The selected USV can also be chosen with the slider/spin button in the single-US
 The title shows the loaded file and the image mode, with `*` while there are unsaved changes:
 
 ```text
-USV260801_001.h5  [fixed]      ← saved
-USV260801_001.h5  [fixed] *    ← unsaved changes
+USV260801_001.h5  [fixed]  [ch 1]      ← saved
+USV260801_001.h5  [fixed]  [ch 1] *    ← unsaved changes
 ```
 
 If a callback fails, the title changes to `ERROR: <action> - Check console` and the details are printed in the Julia console.
@@ -267,7 +278,7 @@ d["liness"]   # Vector{USVBox}
 
 ### Images (image modes)
 
-What Save writes besides the `.jld` depends on the **image mode**. Choose it with `--mode`, or in a dialog at startup. The mode is shown in the window title, e.g. `rec_001.h5  [fixed]`.
+What Save writes besides the `.jld` depends on the **image mode**. Choose it with `--mode`, or in a dialog at startup. It can also be changed at any time from the **Images** dropdown in the window. The mode and channel are shown in the window title, e.g. `rec_001.h5  [fixed]  [ch 1]`.
 
 | Mode | Output |
 |---|---|
