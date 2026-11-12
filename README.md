@@ -130,15 +130,7 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `--list-modes`, `-h`, `--help` | print modes / help |
 
 ```bash
-julia --project=. -t auto Jwi-eak.jl rec_001.h5 --mode fixed
-```
-
-```bash
-julia --project=. -t auto Jwi-eak.jl rec_001.jld -c 2 --mode gui --timescale 1.0
-```
-
-```bash
-julia --project=. Jwi-eak.jl rec_001.jld --export-only --mode fullband --sr 0.3
+julia --project=. -t auto Jwi-eak.jl
 ```
 
 `-t auto` lets the SDTS filter in automatic detection use all CPU cores.
