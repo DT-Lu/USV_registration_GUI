@@ -174,12 +174,31 @@ end
 #   (GtkObservables 의 snap=true 는 만들 때의 range 를 기억해서, range 가 바뀌는 timespan 에는 부적합)
 function round_slider!(s, digits::Integer)
     w = GtkObservables.widget(s)
+    # 1) GTK 자체 반올림 (round-digits): GTK 4.14 실제 마우스 drag 로 확인됨
     try
         w.round_digits = digits
     catch
-        Gtk4.G_.set_round_digits(w, digits)
+        try
+            Gtk4.G_.set_round_digits(w, digits)
+        catch e
+            @warn "could not set slider round-digits" exception = e
+        end
+    end
+    # 2) 안전장치: change-value 에서 직접 반올림해 적용 (GtkObservables 의 snap 과 같은 hook, range 무관)
+    try
+        Gtk4.on_change_value(_round_changevalue_cb, w, Int(digits))
+    catch e
+        @warn "could not attach slider rounding handler" exception = e
     end
     return s
+end
+
+# change-value: 사용자 조작 (drag / 휠 / 키) 이 값을 바꾸기 직전. 반올림한 값을 직접 넣고 1 (= 처리함) 을 반환해
+#   GTK 가 반올림 안 된 원래 값을 적용하지 않게 함. gtk_range_set_value 가 범위 clamp 도 해 줌.
+@guarded Cint(0) function _round_changevalue_cb(ptr::Ptr, scroll, value::Float64, digits)
+    scale = convert(GtkScale, ptr)
+    Gtk4.value(scale, round(value; digits=digits))
+    return Cint(1)
 end
 
 # 시작 창 크기 (창은 이후 마우스로 자유롭게 조절 가능; 화면보다 작아지면 scrollbar)
@@ -1631,6 +1650,19 @@ function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int)
     return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec); sr=sr, channel=channel)
 end
 
+# 어떤 버전으로 실행 중인지 (log 를 보고 바로 알 수 있게). git 이 없으면 생략.
+function version_banner()
+    try
+        d = @__DIR__
+        br = readchomp(`git -C $d rev-parse --abbrev-ref HEAD`)
+        c = readchomp(`git -C $d log -1 --format=%h\ %s`)
+        dirty = isempty(readchomp(`git -C $d status --porcelain --untracked-files=no`)) ? "" : "  (+ local changes)"
+        println("Jwi-eak  [$br]  $c$dirty")
+    catch
+    end
+    return nothing
+end
+
 function main(args::AbstractVector{<:AbstractString}=ARGS)
     opts = try
         parse_cli(args)
@@ -1642,6 +1674,7 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
         return nothing
     end
     opts.help && (print_cli_help(); return nothing)
+    version_banner()
     opts.list_modes && (describe_image_modes(); return nothing)
 
     global choice = opts.channel
