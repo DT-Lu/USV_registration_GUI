@@ -14,7 +14,7 @@ Options:
   -m, --mode NAME      image mode for Save (omit -> asked at startup)
       --timescale S    reference GUI timescale in seconds       (gui-style modes)
       --canvas WxH     reference window size in px, e.g. 1600x500, or "live"
-      --band LO-HI     image band in kHz, e.g. 30-125, or "full"
+      --band B         image band: "box" (each box's own range), "full", or LO-HI in kHz (e.g. 30-125)
       --pad-ms MS      time padding on each side of a box
       --format FMT     png | jpeg
       --export-only    no GUI: export images (+ metadata.txt) for FILE (.jld) and exit
@@ -43,8 +43,9 @@ Base.showerror(io::IO, e::CLIError) = print(io, e.msg)
 
 function _parse_band(s::AbstractString)
     lowercase(s) == "full" && return nothing
+    lowercase(s) == "box" && return :box
     m = match(r"^\s*([0-9.]+)\s*-\s*([0-9.]+)\s*$", s)
-    m === nothing && throw(CLIError("--band expects LO-HI in kHz (e.g. 30-125) or \"full\", got \"$s\""))
+    m === nothing && throw(CLIError("--band expects \"box\", \"full\" or LO-HI in kHz (e.g. 30-125), got \"$s\""))
     lo, hi = parse(Float64, m[1]) * 1e3, parse(Float64, m[2]) * 1e3
     lo < hi || throw(CLIError("--band: LO must be below HI, got \"$s\""))
     return (lo, hi)
