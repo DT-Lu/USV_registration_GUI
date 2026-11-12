@@ -177,7 +177,7 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
     function start(cfg)
         println("Image mode: ", cfg.name, "  (", cfg.desc, ")")
         if file !== nothing
-            build_gui(String(file), cfg) === nothing && notify(GUI_CLOSED)
+            build_gui(String(file), cfg; overrides=overrides) === nothing && notify(GUI_CLOSED)
             return nothing
         end
         open_dialog("Pick a .h5 recording or .jld annotation") do nm
@@ -186,7 +186,7 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
                     println("No file chosen.")
                     notify(GUI_CLOSED)
                 else
-                    build_gui(String(nm), cfg) === nothing && notify(GUI_CLOSED)
+                    build_gui(String(nm), cfg; overrides=overrides) === nothing && notify(GUI_CLOSED)
                 end
             catch e
                 @error "GUI start failed" exception = (e, catch_backtrace())
@@ -212,7 +212,8 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
 end
 
 # 파일 nm 을 열어 main window 를 만듦. 반환: window (실패하면 nothing)
-function build_gui(nm::AbstractString, cfg)
+#   overrides : CLI 값 — 창 안의 Images dropdown 으로 모드를 바꿀 때도 적용
+function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
     try
         nm_ref = Ref{String}("")
         dirty_ref = Ref(false)
@@ -230,8 +231,21 @@ function build_gui(nm::AbstractString, cfg)
             dirty::Bool=false,
         )
             file_label = isempty(filename) ? "USV Manual" : basename(filename)
-            file_label = string(file_label, "  [", image_mode[].name, "]")
+            file_label = string(file_label, "  [", image_mode[].name, "]  [ch ", choice, "]")
             set_title!(win, dirty ? "$(file_label) *" : file_label)
+            return nothing
+        end
+
+        # 새 spectrogram (파일 또는 channel 이 바뀜) 을 GUI 상태에 반영. box (liness) 는 건드리지 않음.
+        function set_spec!(spec)
+            if hasproperty(spec, :t_sng) && length(spec.t_sng) >= 2
+                dt_sng_obs[] = spec.t_sng[2] - spec.t_sng[1]
+                t_sng_obs[] = spec.t_sng
+            else
+                t_sng_obs[] = range(0.0, step=dt_sng_obs[], length=size(spec.fout, 2))
+            end
+            spec_obs[] = spec
+            fout_obs[] = spec.fout
             return nothing
         end
 
@@ -243,15 +257,7 @@ function build_gui(nm::AbstractString, cfg)
             tmp = normalize_liness(raw; nfreq=size(spec.fout, 1))
             tmp = tmp isa Observable ? tmp[] : tmp
 
-            if hasproperty(spec, :t_sng) && length(spec.t_sng) >= 2
-                dt_sng_obs[] = spec.t_sng[2] - spec.t_sng[1]
-                t_sng_obs[] = spec.t_sng
-            else
-                t_sng_obs[] = range(0.0, step=dt_sng_obs[], length=size(spec.fout, 2))
-            end
-
-            spec_obs[] = spec
-            fout_obs[] = spec.fout
+            set_spec!(spec)
             liness[] = tmp
 
             sanity_check_liness!(liness[], last(t_sng_obs[]))
@@ -552,31 +558,61 @@ function build_gui(nm::AbstractString, cfg)
                 modifying[] = false
                 newline[] = [XY{UserUnit}(0.0, 0.0), XY{UserUnit}(0.0, 0.0)]
 
-                obs[] = max(length(liness[]), 1)
-                usvboxind[] = clamp(usvboxind[], 1, obs[])
-
-                refresh_timewidgets!()
-
-                # renewal 
-                ts = round(Int, timespan.observable[])
-                tw = float(timescale.observable[])
-
-                currtime[] = t_sng_obs[][ts]
-
-                set_text!(timestartlabel, "$(t_sng_obs[][ts]) sec ")
-                set_text!(timeendlabel, "$(t_sng_obs[][ts] + tw) sec ")
-
-                obsimg[] = update_sng(fout_obs[], ts, tw, sngscale.observable[]; dt_sng=dt_sng_obs[])
-
-                # notify/redraw 
-                gui_idle("after load") do
-                    request_liness_notify()
-                    request_hist_update()
-                    Observables.notify(usvboxind)  # single panel update trigger 
-                end
+                refresh_view!()
 
                 set_dirty!(false)
                 println("Loaded: ", newnm)
+            end
+        end
+
+        # spectrogram 이나 box 가 바뀐 뒤 slider 범위 / 화면 / histogram / 단일 USV 패널 갱신
+        function refresh_view!()
+            obs[] = max(length(liness[]), 1)
+            usvboxind[] = clamp(usvboxind[], 1, obs[])
+
+            refresh_timewidgets!()
+
+            # renewal 
+            ts = round(Int, timespan.observable[])
+            tw = float(timescale.observable[])
+
+            currtime[] = t_sng_obs[][ts]
+
+            set_text!(timestartlabel, "$(t_sng_obs[][ts]) sec ")
+            set_text!(timeendlabel, "$(t_sng_obs[][ts] + tw) sec ")
+
+            obsimg[] = update_sng(fout_obs[], ts, tw, sngscale.observable[]; dt_sng=dt_sng_obs[])
+
+            # notify/redraw 
+            gui_idle("after data change") do
+                request_liness_notify()
+                request_hist_update()
+                Observables.notify(usvboxind)  # single panel update trigger 
+            end
+            return nothing
+        end
+
+        # analog channel 바꾸기: 같은 .h5 의 다른 channel 로 spectrogram 만 다시 계산, box 는 유지.
+        #   실패하면 (예: channel 이 하나뿐인 파일) 원래 channel 로 되돌리고 false.
+        function switch_channel!(n::Int)
+            n == choice && return true
+            old = choice
+            try
+                path = nm_ref[]
+                dotloc = findlast('.', path)
+                nmh5 = endswith(lowercase(path), ".jld") ? string(path[1:dotloc-1], ".h5") : path
+                println("Switching to channel $n ...")
+                global choice = n
+                spec, _ = load_file(nmh5, n)      # .h5 → box 없이 spectrogram 만
+                set_spec!(spec)
+                refresh_view!()
+                update_window_title!(win, nm_ref[]; dirty=dirty_ref[])
+                println("Channel $n loaded (boxes kept: $(length(liness[])))")
+                return true
+            catch e
+                global choice = old
+                @error "channel switch to $n failed (does the file have that analog channel?); staying on channel $old" exception = (e, catch_backtrace())
+                return false
             end
         end
 
@@ -703,6 +739,50 @@ end
         detectioncb = b["detection"]
         signal_connect(detectioncb, "clicked") do _
             do_detection()
+        end
+
+        # --- 창을 연 채로 바꾸는 설정 (2026-11): analog channel / image mode -------------
+        #   버튼 열 (Load / Save / USV detection / Delete) 아래에 dropdown 2 개.
+        #   channel: 같은 파일의 다른 channel 로 spectrogram 재계산 (box 유지, 저장 안 된 box 도 유지)
+        #   image mode: 다음 Save 부터 적용
+        funcbox = b["function"]
+        ch_names = ["Channel 1", "Channel 2"]
+        chdd = dropdown(ch_names; value=ch_names[clamp(choice, 1, length(ch_names))])
+        mode_label(name) = "Images: " * name
+        modedd = dropdown(mode_label.(image_mode_names()); value=mode_label(image_mode[].name))
+        push!(funcbox, GtkObservables.widget(chdd))
+        push!(funcbox, GtkObservables.widget(modedd))
+        prevent_focus_on_click!(chdd)      # 화살표 키가 dropdown 대신 창 단축키로 가도록
+        prevent_focus_on_click!(modedd)
+
+        reverting_channel = Ref(false)
+        on(observable(chdd)) do sel
+            (reverting_channel[] || sel === nothing) && return
+            n = parse(Int, last(split(sel)))
+            n == choice && return
+            gui_idle("channel change") do
+                if !switch_channel!(n)
+                    reverting_channel[] = true
+                    try
+                        chdd[] = ch_names[choice]      # dropdown 을 실제 channel 로 되돌림
+                    finally
+                        reverting_channel[] = false
+                    end
+                end
+            end
+        end
+
+        on(observable(modedd)) do sel
+            sel === nothing && return
+            name = replace(sel, "Images: " => "")
+            name == image_mode[].name && return
+            safe_cb("image mode change") do
+                # CLI 의 --timescale 등은 gui 계열 모드에만 의미가 있음 (다른 모드면 경고 없이 무시)
+                ov = find_image_mode(name).style === :gui ? overrides : (;)
+                image_mode[] = image_mode_config(name; overrides=ov)
+                println("Image mode: ", image_mode[].name, "  (", image_mode[].desc, ")")
+                update_window_title!(win, nm_ref[]; dirty=dirty_ref[])
+            end
         end
 
         function step_timespan!(d::Int)
