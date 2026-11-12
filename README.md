@@ -102,7 +102,10 @@ This upgrades GtkObservables 1.x → 2.x, adds Gtk4 and keeps every other packag
 * **Dialogs:** the startup mode dialog and the file dialogs are now GTK 4 dialogs.
 * **Shortcuts:** they work no matter which widget was clicked last; there's no need to click the window first.
 * **Mouse wheel:** zoom works over the spectrogram and air-flow panels and on empty areas, and sliders still scroll themselves.
-* **Window size:** GTK 4's default theme draws larger widgets, so the smallest possible window is about 1800×1360 px (GTK 3: about 1650×1250).
+* **Window size:** the window is freely resizable and fits laptops.
+  * **Start size:** the window opens at about 90% × 85% of the screen. Override with `--window max` or `--window 1280x720`.
+  * **Minimum size:** the layout needs about 920×600 px, down from 1800×1360. If the window is made smaller than that, scrollbars appear instead of the window refusing to shrink.
+  * **Extra space:** extra height goes to the spectrogram. The controls and the histogram panel keep their natural height, and the air-flow panel stays a low strip.
 
 
 ---
@@ -128,6 +131,7 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `--pad-ms MS` | time padding on each side of a box |
 | `--format FMT` | `png` or `jpeg` |
 | `--export-only` | no GUI: write images + `metadata.txt` for a `.jld` and exit (needs `--mode`) |
+| `--window W` | start window size: `fit` (default, ~90% of the screen), `max`, or `WxH`, e.g. `1280x720` |
 | `--sr X` | contrast cap for `--export-only` (the GUI's sngscale value, default 0.5) |
 | `--list-modes`, `-h`, `--help` | print modes / help |
 

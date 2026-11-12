@@ -168,6 +168,32 @@ function export_jpegs_after_save(nmjld::AbstractString;
     return outdir
 end
 
+# 시작 창 크기 (창은 이후 마우스로 자유롭게 조절 가능; 화면보다 작아지면 scrollbar)
+#   :fit   → 첫 번째 모니터의 약 90% × 85% (Windows 배율이 반영된 logical px, 작업표시줄 여유)
+#   :max   → 최대화
+#   (w, h) → 그 크기
+function size_window!(win, spec=:fit)
+    if spec === :max
+        Gtk4.maximize(win)
+        println("Window: maximized")
+        return nothing
+    end
+    w, h = if spec isa Tuple
+        spec
+    else
+        sw, sh = try
+            Int.(Gtk4.screen_size())
+        catch e
+            @warn "could not read the screen size; using 1600x1000" exception = e
+            (1600, 1000)
+        end
+        (round(Int, 0.90sw), round(Int, 0.85sh))
+    end
+    Gtk4.default_size(win, w, h)
+    println("Window: $(w)x$(h)  (resize freely; start options: --window fit | max | WxH)")
+    return nothing
+end
+
 # 녹음/annotation 파일을 못 읽었을 때 (손상·잘린 파일, 짝 .h5 없음, 없는 channel ...)
 struct FileLoadError <: Exception
     path::String
@@ -211,12 +237,12 @@ end
 # overrides : --timescale 등 CLI 값 (dialog 로 고른 모드에도 적용)
 # 창이 끝내 안 만들어지면 (취소/오류) GUI_CLOSED 를 notify → 명령행 실행이 끝남
 function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothing,
-                  overrides::NamedTuple=(;))
+                  overrides::NamedTuple=(;), window=:fit)
     function start(cfg)
         println("Image mode: ", cfg.name, "  (", cfg.desc, ")")
         if file !== nothing
             # 명령행으로 준 파일: 못 열면 (메시지 출력 후) 종료
-            build_gui(String(file), cfg; overrides=overrides) isa GtkWindow || notify(GUI_CLOSED)
+            build_gui(String(file), cfg; overrides=overrides, window=window) isa GtkWindow || notify(GUI_CLOSED)
             return nothing
         end
         pick_file(cfg)
@@ -232,7 +258,7 @@ function make_gui(; file::Union{Nothing,AbstractString}=nothing, image_cfg=nothi
                     notify(GUI_CLOSED)
                     return
                 end
-                r = build_gui(String(nm), cfg; overrides=overrides)
+                r = build_gui(String(nm), cfg; overrides=overrides, window=window)
                 if r === :load_failed
                     pick_file(cfg, "Could not open $(basename(nm)) (see console) - pick another file, or Cancel to quit")
                 elseif !(r isa GtkWindow)
@@ -264,7 +290,7 @@ end
 # 파일 nm 을 열어 main window 를 만듦.
 #   반환: window | :load_failed (파일을 못 읽음; 메시지는 이미 출력) | nothing (그 밖의 시작 오류)
 #   overrides : CLI 값 — 창 안의 Images dropdown 으로 모드를 바꿀 때도 적용
-function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
+function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;), window=:fit)
     try
         nm_ref = Ref{String}("")
         dirty_ref = Ref(false)
@@ -551,6 +577,11 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;))
         spanpixel = Int(floor(2.0 / dt_sng_obs[]))
         maxstart0 = max(npixel - spanpixel, 1)
         timespan = slider(1:maxstart0)
+        # 값 표시 끄기 (frame 번호라 의미 없음; 시작/끝 초는 spectrogram 아래에 표시) → 작은 화면에서 세로 공간 절약
+        try
+            Gtk4.draw_value(GtkObservables.widget(timespan), false)
+        catch
+        end
         push!(timespanbox, timespan)
 
         # time scale slider 
@@ -1253,6 +1284,7 @@ end
             return false          # false = 창 닫기 허용
         end
         update_window_title!(win, nm_ref[]; dirty=dirty_ref[])
+        size_window!(win, window) # 화면에 맞춘 시작 크기 (이후 자유롭게 조절 가능)
         present(win)              # GTK4: showall 없음 (위젯은 기본으로 보임)
         return win
     catch e
@@ -1605,7 +1637,7 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     script = !isinteractive()
     script && Gtk4.GLib.start_main_loop()
 
-    make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides)
+    make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides, window=opts.window)
 
     # 명령행 실행: 창이 닫히거나 (dialog 취소 / 시작 실패 포함) 할 때까지 기다림
     if script

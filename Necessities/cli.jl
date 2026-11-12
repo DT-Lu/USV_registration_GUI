@@ -19,6 +19,7 @@ Options:
       --format FMT     png | jpeg
       --export-only    no GUI: export images (+ metadata.txt) for FILE (.jld) and exit
       --sr X           contrast cap for --export-only (GUI sngscale value; default 0.5)
+      --window W       start window size: fit (default, ~90% of the screen), max, or WxH (e.g. 1280x720)
       --list-modes     print the image modes and exit
   -h, --help           print this help and exit
 
@@ -75,7 +76,7 @@ end
 function parse_cli(args::AbstractVector{<:AbstractString})
     file = nothing; channel = 1; mode = nothing
     overrides = (;); export_only = false; sr = 0.5
-    help = false; list_modes = false
+    help = false; list_modes = false; window = :fit
     i = 1
     function value(opt)
         i < length(args) || throw(CLIError("$opt needs a value"))
@@ -114,6 +115,10 @@ function parse_cli(args::AbstractVector{<:AbstractString})
             overrides = merge(overrides, (; ext=fm))
         elseif a == "--export-only"
             export_only = true
+        elseif a == "--window"
+            v = lowercase(value(a))
+            window = v == "fit" ? :fit : v == "max" ? :max : _parse_canvas(v)
+            window === nothing && throw(CLIError("--window expects fit, max or WxH (e.g. 1280x720)"))
         elseif a == "--sr"
             sr = _parse_num(Float64, value(a), a)
             sr > 0 || throw(CLIError("--sr must be > 0"))
@@ -137,5 +142,5 @@ function parse_cli(args::AbstractVector{<:AbstractString})
         mode === nothing && throw(CLIError("--export-only needs --mode"))
         mode == "lite" && throw(CLIError("--export-only with --mode lite would export nothing"))
     end
-    return (; file, channel, mode, overrides, export_only, sr, help, list_modes)
+    return (; file, channel, mode, overrides, export_only, sr, help, list_modes, window)
 end

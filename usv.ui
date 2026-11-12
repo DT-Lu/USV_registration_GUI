@@ -10,423 +10,440 @@
     <property name="default-width">1000</property>
     <property name="default-height">800</property>
     <child>
-      <object class="GtkGrid" id="grid">
-        <property name="focusable">False</property>
+      <object class="GtkScrolledWindow" id="scroll">
+        <property name="hscrollbar-policy">automatic</property>
+        <property name="vscrollbar-policy">automatic</property>
         <property name="hexpand">True</property>
         <property name="vexpand">True</property>
-        <property name="row-homogeneous">True</property>
-        <property name="column-homogeneous">True</property>
         <child>
-          <object class="GtkLabel" id="airlabel">
+          <object class="GtkGrid" id="grid">
             <property name="focusable">False</property>
             <property name="hexpand">True</property>
             <property name="vexpand">True</property>
-            <property name="label" translatable="yes">Air flow</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">0</property>
-              <property name="column-span">9</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="snglabel">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">Spectrogram</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">5</property>
-              <property name="column-span">9</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="timespanbox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">12</property>
-              <property name="column-span">7</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timespan">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">timespan</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">12</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timespin">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">current index</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">14</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="currentindexbox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">14</property>
-              <property name="column-span">7</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timescale">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">time scale</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">13</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="timescalebox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">13</property>
-              <property name="column-span">7</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="sngdis">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">6</property>
-              <property name="column-span">7</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="airdis">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">1</property>
-              <property name="column-span">7</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="snglabel2">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">Spectrogram</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">6</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="airlabel2">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">Air Flow</property>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">1</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="sngscalebox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">8</property>
-              <property name="row">6</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="airscalebox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">8</property>
-              <property name="row">1</property>
-              <property name="row-span">4</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timestart">
-            <property name="focusable">False</property>
-            <property name="halign">start</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">0</property>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">10</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timeend">
-            <property name="focusable">False</property>
-            <property name="halign">end</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">10</property>
-            <layout>
-              <property name="column">7</property>
-              <property name="row">10</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkLabel" id="timelabel">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="label" translatable="yes">Time</property>
-            <layout>
-              <property name="column">4</property>
-              <property name="row">10</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="function">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
+            <property name="row-homogeneous">False</property>
+            <property name="column-homogeneous">False</property>
+            <property name="row-spacing">2</property>
+            <property name="column-spacing">4</property>
+            <property name="margin-start">4</property>
+            <property name="margin-end">4</property>
+            <property name="margin-top">4</property>
+            <property name="margin-bottom">4</property>
             <child>
-              <object class="GtkButton" id="load">
-                <property name="label" translatable="yes">Load</property>
-                <property name="focusable">True</property>
-                <property name="receives-default">True</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="save">
-                <property name="label">Save</property>
-                <property name="focusable">True</property>
-                <property name="receives-default">True</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="detection">
-                <property name="label" translatable="yes">USV detection</property>
-                <property name="focusable">True</property>
-                <property name="receives-default">True</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-              </object>
-            </child>
-            <child>
-              <object class="GtkButton" id="delete">
-                <property name="label">Delete</property>
-                <property name="focusable">True</property>
-                <property name="receives-default">True</property>
-                <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-              </object>
-            </child>
-            <layout>
-              <property name="column">0</property>
-              <property name="row">15</property>
-              <property name="row-span">7</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="usvparambox">
-            <property name="focusable">False</property>
-            <property name="hexpand">True</property>
-            <property name="vexpand">True</property>
-            <property name="orientation">vertical</property>
-            <property name="homogeneous">True</property>
-            <layout>
-              <property name="column">3</property>
-              <property name="row">15</property>
-              <property name="column-span">6</property>
-              <property name="row-span">7</property>
-            </layout>
-          </object>
-        </child>
-        <child>
-          <object class="GtkBox" id="currentusvbox">
-            <property name="focusable">False</property>
-            <property name="hexpand">False</property>
-            <property name="vexpand">True</property>
-            <property name="homogeneous">True</property>
-            <child>
-              <object class="GtkGrid" id="singlesng">
+              <object class="GtkLabel" id="airlabel">
                 <property name="focusable">False</property>
                 <property name="hexpand">True</property>
-                <property name="vexpand">True</property>
-                <property name="row-homogeneous">True</property>
-                <property name="column-homogeneous">True</property>
-                <child>
-                  <object class="GtkBox" id="singlesngind">
-                    <property name="focusable">False</property>
-                    <property name="orientation">vertical</property>
-                    <property name="homogeneous">False</property>
-                    <layout>
-                      <property name="column">0</property>
-                      <property name="row">0</property>
-                      <property name="column-span">4</property>
-                    </layout>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkBox" id="singlesngdis">
-                    <property name="focusable">False</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
-                    <property name="orientation">vertical</property>
-                    <property name="homogeneous">True</property>
-                    <layout>
-                      <property name="column">0</property>
-                      <property name="row">1</property>
-                      <property name="column-span">4</property>
-                      <property name="row-span">3</property>
-                    </layout>
-                  </object>
-                </child>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">Air flow</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">0</property>
+                  <property name="column-span">9</property>
+                </layout>
               </object>
             </child>
             <child>
-              <object class="GtkBox" id="currentusvparambox">
+              <object class="GtkLabel" id="snglabel">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">Spectrogram</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">5</property>
+                  <property name="column-span">9</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="timespanbox">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">12</property>
+                  <property name="column-span">7</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timespan">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">timespan</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">12</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timespin">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">current index</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">14</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="currentindexbox">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">14</property>
+                  <property name="column-span">7</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timescale">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">time scale</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">13</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="timescalebox">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">13</property>
+                  <property name="column-span">7</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="sngdis">
                 <property name="focusable">False</property>
                 <property name="hexpand">True</property>
                 <property name="vexpand">True</property>
                 <property name="orientation">vertical</property>
                 <property name="homogeneous">True</property>
-                <child>
-                  <object class="GtkLabel" id="currentusvindex">
-                    <property name="focusable">False</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
-                    <property name="label" translatable="yes">Current USV : 
-128 /1000</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                    </attributes>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="currentusvdur">
-                    <property name="focusable">False</property>
-                    <property name="label" translatable="yes">100 ms</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                      <attribute name="foreground" value="#1a1a5f5fb4b4" />
-                    </attributes>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="currentusvamp">
-                    <property name="focusable">False</property>
-                    <property name="label" translatable="yes">10 dB</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                      <attribute name="foreground" value="#a5a51d1d2d2d" />
-                    </attributes>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="currentusvspur">
-                    <property name="focusable">False</property>
-                    <property name="label" translatable="yes">0.5</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                      <attribute name="foreground" value="#e5e5a5a50a0a" />
-                    </attributes>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="currentusvpitch">
-                    <property name="focusable">False</property>
-                    <property name="label" translatable="yes">50 Hz</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                      <attribute name="foreground" value="#2e2ec2c27e7e" />
-                    </attributes>
-                  </object>
-                </child>
-                <child>
-                  <object class="GtkLabel" id="currentusvpitchvariance">
-                    <property name="focusable">False</property>
-                    <property name="hexpand">True</property>
-                    <property name="vexpand">True</property>
-                    <property name="label" translatable="yes">9 /Hz2</property>
-                    <attributes>
-                      <attribute name="font-desc" value="Sans-Serif 20" />
-                      <attribute name="foreground" value="#81813d3d9c9c" />
-                    </attributes>
-                  </object>
-                </child>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">6</property>
+                  <property name="column-span">7</property>
+                  <property name="row-span">4</property>
+                </layout>
               </object>
             </child>
-            <layout>
-              <property name="column">1</property>
-              <property name="row">15</property>
-              <property name="column-span">2</property>
-              <property name="row-span">7</property>
-            </layout>
+            <child>
+              <object class="GtkBox" id="airdis">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <property name="height-request">64</property>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">1</property>
+                  <property name="column-span">7</property>
+                  <property name="row-span">4</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="snglabel2">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">Spectrogram</property>
+                <property name="valign">center</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">6</property>
+                  <property name="row-span">4</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="airlabel2">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">Air Flow</property>
+                <property name="valign">center</property>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">1</property>
+                  <property name="row-span">4</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="sngscalebox">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">True</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <layout>
+                  <property name="column">8</property>
+                  <property name="row">6</property>
+                  <property name="row-span">4</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="airscalebox">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <layout>
+                  <property name="column">8</property>
+                  <property name="row">1</property>
+                  <property name="row-span">4</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timestart">
+                <property name="focusable">False</property>
+                <property name="halign">start</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">0</property>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">10</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timeend">
+                <property name="focusable">False</property>
+                <property name="halign">end</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">10</property>
+                <layout>
+                  <property name="column">7</property>
+                  <property name="row">10</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel" id="timelabel">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="label" translatable="yes">Time</property>
+                <layout>
+                  <property name="column">4</property>
+                  <property name="row">10</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="function">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <child>
+                  <object class="GtkButton" id="load">
+                    <property name="label" translatable="yes">Load</property>
+                    <property name="focusable">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="save">
+                    <property name="label">Save</property>
+                    <property name="focusable">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="detection">
+                    <property name="label" translatable="yes">USV detection</property>
+                    <property name="focusable">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="delete">
+                    <property name="label">Delete</property>
+                    <property name="focusable">True</property>
+                    <property name="receives-default">True</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                  </object>
+                </child>
+                <layout>
+                  <property name="column">0</property>
+                  <property name="row">15</property>
+                  <property name="row-span">7</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="usvparambox">
+                <property name="focusable">False</property>
+                <property name="hexpand">True</property>
+                <property name="vexpand">False</property>
+                <property name="orientation">vertical</property>
+                <property name="homogeneous">True</property>
+                <layout>
+                  <property name="column">3</property>
+                  <property name="row">15</property>
+                  <property name="column-span">6</property>
+                  <property name="row-span">7</property>
+                </layout>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="currentusvbox">
+                <property name="focusable">False</property>
+                <property name="hexpand">False</property>
+                <property name="vexpand">False</property>
+                <property name="homogeneous">True</property>
+                <child>
+                  <object class="GtkGrid" id="singlesng">
+                    <property name="focusable">False</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                    <property name="row-homogeneous">False</property>
+                    <property name="column-homogeneous">True</property>
+                    <child>
+                      <object class="GtkBox" id="singlesngind">
+                        <property name="focusable">False</property>
+                        <property name="orientation">vertical</property>
+                        <property name="homogeneous">False</property>
+                        <layout>
+                          <property name="column">0</property>
+                          <property name="row">0</property>
+                          <property name="column-span">4</property>
+                        </layout>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="singlesngdis">
+                        <property name="focusable">False</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <property name="orientation">vertical</property>
+                        <property name="homogeneous">True</property>
+                        <layout>
+                          <property name="column">0</property>
+                          <property name="row">1</property>
+                          <property name="column-span">4</property>
+                          <property name="row-span">3</property>
+                        </layout>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox" id="currentusvparambox">
+                    <property name="focusable">False</property>
+                    <property name="hexpand">True</property>
+                    <property name="vexpand">True</property>
+                    <property name="orientation">vertical</property>
+                    <property name="homogeneous">False</property>
+                    <child>
+                      <object class="GtkLabel" id="currentusvindex">
+                        <property name="focusable">False</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <property name="label" translatable="yes">Current USV : 
+128 /1000</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="currentusvdur">
+                        <property name="focusable">False</property>
+                        <property name="label" translatable="yes">100 ms</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                          <attribute name="foreground" value="#1a1a5f5fb4b4" />
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="currentusvamp">
+                        <property name="focusable">False</property>
+                        <property name="label" translatable="yes">10 dB</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                          <attribute name="foreground" value="#a5a51d1d2d2d" />
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="currentusvspur">
+                        <property name="focusable">False</property>
+                        <property name="label" translatable="yes">0.5</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                          <attribute name="foreground" value="#e5e5a5a50a0a" />
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="currentusvpitch">
+                        <property name="focusable">False</property>
+                        <property name="label" translatable="yes">50 Hz</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                          <attribute name="foreground" value="#2e2ec2c27e7e" />
+                        </attributes>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="currentusvpitchvariance">
+                        <property name="focusable">False</property>
+                        <property name="hexpand">True</property>
+                        <property name="vexpand">True</property>
+                        <property name="label" translatable="yes">9 /Hz2</property>
+                        <attributes>
+                          <attribute name="font-desc" value="Sans-Serif 20" />
+                          <attribute name="foreground" value="#81813d3d9c9c" />
+                        </attributes>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <layout>
+                  <property name="column">1</property>
+                  <property name="row">15</property>
+                  <property name="column-span">2</property>
+                  <property name="row-span">7</property>
+                </layout>
+              </object>
+            </child>
           </object>
         </child>
       </object>
