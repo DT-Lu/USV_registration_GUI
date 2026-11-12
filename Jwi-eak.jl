@@ -14,6 +14,8 @@ if Base.find_package("Gtk4") === nothing || Base.find_package("GtkObservables") 
 end
 
 using Gtk4, GtkObservables, Graphics, Colors, CairoMakie, Cairo
+# 주의: width / height 는 Gtk4(Graphics) 와 CairoMakie(GeometryBasics) 가 서로 다른 함수로 export
+#       → 이름만 쓰면 UndefVarError (ambiguous). 위젯 크기는 항상 Gtk4.width / Gtk4.height 로.
 using Gtk4.GLib
 using JLD
 using HDF5
@@ -774,7 +776,7 @@ end
         function export_images_after_save(nmjld::AbstractString, lns)
             spec = spec_obs[]
             spec === nothing && return nothing
-            w, h = width(sngw), height(sngw)
+            w, h = Gtk4.width(sngw), Gtk4.height(sngw)
             live = (w > 1 && h > 1) ? (Int(w), Int(h)) : nothing
             return run_image_export(image_mode[], nmjld, spec, liness_to_boxes(lns, spec);
                                     sr=float(sngscale.observable[]), channel=choice,
@@ -1182,7 +1184,7 @@ end
         # Draw on the canvas 
         redraw = draw(sngcanvas, liness, newline, obsimg, usvboxind) do cnvs, lns, newl, imgss, ubi
             try
-                w, h = width(cnvs), height(cnvs)
+                w, h = Gtk4.width(cnvs), Gtk4.height(cnvs)
                 (w <= 1 || h <= 1) && return
 
                 fill!(cnvs, colorant"white")   # background is white 
@@ -1280,8 +1282,8 @@ end
 
 function drawonto(canvas, figure)
     try
-        w = width(canvas)
-        h = height(canvas)
+        w = Gtk4.width(canvas)
+        h = Gtk4.height(canvas)
         (w <= 1 || h <= 1) && return
 
         surf = Gtk4.cairo_surface(canvas)
