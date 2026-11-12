@@ -8,7 +8,7 @@ if Base.find_package("Gtk4") === nothing || Base.find_package("GtkObservables") 
     Gtk4 / GtkObservables 2 are not installed in this environment yet.
     Run once in the repository folder:
 
-        julia --project=. -e "using Pkg; Pkg.resolve(); Pkg.instantiate()"
+        julia setup_gtk4.jl
     """)
     isinteractive() ? error("Gtk4 not installed") : exit(1)
 end

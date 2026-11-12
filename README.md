@@ -89,8 +89,10 @@ Pkg.instantiate()
 The `Gtk4` branch replaces `Gtk` (GTK 3) with `Gtk4` and needs GtkObservables 2. After switching branches, update the environment once:
 
 ```bash
-julia --project=. -e "using Pkg; Pkg.resolve(); Pkg.instantiate()"
+julia setup_gtk4.jl
 ```
+
+This upgrades GtkObservables 1.x → 2.x, adds Gtk4 and keeps every other package at its current version. Commit the updated `Manifest.toml` afterwards. `Pkg.resolve()` does **not** work for this step: it keeps all Manifest versions and fails with `empty intersection between GtkObservables@1.2.9 and project compatibility 2`.
 
 `Gtk` and `Gtk4` cannot be loaded in the same Julia session, so restart Julia if `Gtk` was loaded earlier. If `Jwi-eak.jl` is started before this step, it prints the command above and exits.
 
