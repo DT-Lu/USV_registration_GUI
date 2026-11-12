@@ -168,6 +168,20 @@ function export_jpegs_after_save(nmjld::AbstractString;
     return outdir
 end
 
+# GTK4 slider 는 마우스로 끌면 step 과 상관없이 소수 값을 냄 (GTK3 은 반올림했음).
+#   정수 range 의 slider (Int observable) 에서는 InexactError 로 터지므로, GTK 의 round-digits 로
+#   사용자 조작 값을 반올림. digits = 소수 자리 수 (정수 slider 는 0).
+#   (GtkObservables 의 snap=true 는 만들 때의 range 를 기억해서, range 가 바뀌는 timespan 에는 부적합)
+function round_slider!(s, digits::Integer)
+    w = GtkObservables.widget(s)
+    try
+        w.round_digits = digits
+    catch
+        Gtk4.G_.set_round_digits(w, digits)
+    end
+    return s
+end
+
 # 시작 창 크기 (창은 이후 마우스로 자유롭게 조절 가능; 화면보다 작아지면 scrollbar)
 #   :fit   → 첫 번째 모니터의 약 90% × 85% (Windows 배율이 반영된 logical px, 작업표시줄 여유)
 #   :max   → 최대화
@@ -522,6 +536,7 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;), window=:f
             singlespin = spinbutton(1:smax; observable=usvboxind)
         end
 
+        round_slider!(singleslider, 0)       # 정수 index (GTK4 는 끌면 소수가 나옴 → Int observable 에 InexactError)
         push!(singlesngindbox, singleslider) # slider    
         push!(singlesngindbox, singlespin)
 
@@ -577,6 +592,7 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;), window=:f
         spanpixel = Int(floor(2.0 / dt_sng_obs[]))
         maxstart0 = max(npixel - spanpixel, 1)
         timespan = slider(1:maxstart0)
+        round_slider!(timespan, 0)           # 정수 frame index
         # 값 표시 끄기 (frame 번호라 의미 없음; 시작/끝 초는 spectrogram 아래에 표시) → 작은 화면에서 세로 공간 절약
         try
             Gtk4.draw_value(GtkObservables.widget(timespan), false)
@@ -586,6 +602,7 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;), window=:f
 
         # time scale slider 
         timescale = slider(0.1:0.1:15.0)
+        round_slider!(timescale, 1)          # 0.1 s 단위
         push!(timescalebox, timescale)
 
         # time spin button 
@@ -599,10 +616,12 @@ function build_gui(nm::AbstractString, cfg; overrides::NamedTuple=(;), window=:f
 
         # air yaxis scale 
         airscale = slider(0.1:0.1:3.0, orientation="vertical")
+        round_slider!(airscale, 1)
         push!(airscalebox, airscale)
 
         # sng yaxis scale 
         sngscale = slider(0.01:0.01:1.0, orientation="vertical")
+        round_slider!(sngscale, 2)
         push!(sngscalebox, sngscale)
 
         # vertical scale widgets click focus preventation 
