@@ -17,7 +17,8 @@ Options:
       --band B         image band: "box" (each box's own range), "full", or LO-HI in kHz (e.g. 30-125)
       --pad-ms MS      time padding on each side of a box
       --format FMT     png | jpeg
-      --export-only    no GUI: export images (+ metadata.txt) for FILE (.jld) and exit
+      --export-only    no GUI: export images (+ metadata.txt) and exit. PATH = one .jld file, or a folder:
+                       every .jld in it and its subfolders that has a matching .h5 next to it
       --sr X           contrast cap for --export-only (GUI sngscale value; default 0.5)
       --window W       start window size: fit (default, ~90% of the screen), max, or WxH (e.g. 1280x720)
       --list-modes     print the image modes and exit
@@ -131,14 +132,19 @@ function parse_cli(args::AbstractVector{<:AbstractString})
         i += 1
     end
     if file !== nothing
-        isfile(file) || throw(CLIError("file not found: $file"))
-        ext = lowercase(splitext(file)[2])
-        ext in (".h5", ".jld") || throw(CLIError("FILE must be .h5 or .jld, got \"$file\""))
+        if isdir(file)
+            export_only || throw(CLIError("a folder is only accepted with --export-only; to open the GUI give one .h5 or .jld file"))
+        else
+            isfile(file) || throw(CLIError("file or folder not found: $file"))
+            ext = lowercase(splitext(file)[2])
+            ext in (".h5", ".jld") || throw(CLIError("FILE must be .h5 or .jld, got \"$file\""))
+        end
         file = abspath(file)
     end
     if export_only && !help && !list_modes
-        file === nothing && throw(CLIError("--export-only needs a .jld FILE"))
-        endswith(lowercase(file), ".jld") || throw(CLIError("--export-only needs a .jld FILE (boxes come from it)"))
+        file === nothing && throw(CLIError("--export-only needs a .jld file or a folder"))
+        (isdir(file) || endswith(lowercase(file), ".jld")) ||
+            throw(CLIError("--export-only needs a .jld file (boxes come from it) or a folder of them"))
         mode === nothing && throw(CLIError("--export-only needs --mode"))
         mode == "lite" && throw(CLIError("--export-only with --mode lite would export nothing"))
     end

@@ -1681,7 +1681,9 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
 
     if opts.export_only
-        return export_only_run(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        ok = export_only_batch(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        (!ok && !isinteractive()) && exit(1)     # 스크립트에서 실패 여부를 알 수 있게
+        return ok
     end
 
     # GTK4: REPL 에서는 GLib main loop 가 자동으로 돌지만, 명령행 실행에서는 직접 시작해야 함.
