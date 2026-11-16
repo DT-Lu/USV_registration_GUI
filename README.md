@@ -105,9 +105,20 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `--band B` | image frequency range: `box` (each box's own range), `full`, or LO-HI in kHz, e.g. `30-125` |
 | `--pad-ms MS` | time padding on each side of a box |
 | `--format FMT` | `png` or `jpeg` |
-| `--export-only` | no GUI: write images + `metadata.txt` for a `.jld` and exit (needs `--mode`) |
+| `--export-only` | no GUI: write images + `metadata.txt` and exit (needs `--mode`). PATH is one `.jld`, or a **folder**: every `.jld` in it and its subfolders that has a matching `.h5` next to it |
 | `--sr X` | contrast cap for `--export-only` (the GUI's sngscale value, default 0.5) |
 | `--list-modes`, `-h`, `--help` | print modes / help |
+
+Export a whole folder (including subfolders) without opening the GUI:
+
+```bash
+julia --project=. Jwi-eak.jl "D:/USV data/batch21" --export-only --mode fixed
+```
+
+* `.jld` files without a same-named `.h5` in the same folder are listed as skipped.
+* Each `.jld` gets its own `<name>_images/` (or `_jpegs/`) folder with `metadata.txt`, next to the file.
+* A file that fails, such as a truncated `.h5`, is reported with a one-line reason and the export continues with the next file.
+* A summary is printed at the end. Julia exits with code 1 if any file failed or nothing was found.
 
 ```bash
 julia --project=. -t auto Jwi-eak.jl

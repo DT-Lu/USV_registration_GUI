@@ -207,3 +207,74 @@ function write_image_metadata(path::AbstractString, header, rows)
     println("Metadata written: ", path)
     return path
 end
+
+# --- export-only: 한 파일 또는 폴더 전체 -----------------------------------------
+# path 가 .jld 파일이면 그 파일만, 폴더면 하위 폴더까지 (walkdir) 모든 .jld 중에서
+# 같은 폴더에 같은 이름의 .h5 가 있는 것만 대상. 반환: (targets, no_pair) — 둘 다 정렬된 절대 경로.
+function find_export_targets(path::AbstractString)
+    has_pair(jld) = isfile(string(splitext(jld)[1], ".h5"))
+    if isfile(path)
+        p = abspath(path)
+        return has_pair(p) ? ([p], String[]) : (String[], [p])
+    end
+    targets, no_pair = String[], String[]
+    onerr(e) = @warn "skipping a folder that cannot be read" exception = e
+    for (root, _, files) in walkdir(abspath(path); onerror=onerr)
+        for f in files
+            lowercase(splitext(f)[2]) == ".jld" || continue
+            p = joinpath(root, f)
+            push!(has_pair(p) ? targets : no_pair, p)
+        end
+    end
+    return sort!(targets), sort!(no_pair)
+end
+
+# 오류를 한 줄로 (Gtk4 판의 load_error_hint 가 있으면 그것으로: 잘린 .h5 등 원인 설명)
+function _short_export_error(path, e)
+    if isdefined(Main, :load_error_hint) && isdefined(Main, :FileLoadError)
+        return Main.load_error_hint(Main.FileLoadError(String(path), e))
+    end
+    return first(split(sprint(showerror, e), '\n'))
+end
+
+# export-only 일괄 실행. 파일 하나가 실패해도 다음 파일로 계속. 반환: 모두 성공했으면 true.
+function export_only_batch(path::AbstractString, cfg; sr::Real, channel::Int)
+    targets, no_pair = find_export_targets(path)
+    root = isdir(path) ? abspath(path) : dirname(abspath(path))
+    rel(p) = relpath(p, root)
+    println("Export only: ", abspath(path))
+    println("  mode ", cfg.name, ", channel ", channel, ", sr ", sr)
+    println("  ", length(targets), " .jld file(s) with a matching .h5",
+            isempty(no_pair) ? "" : ", $(length(no_pair)) skipped (no matching .h5)")
+    for p in no_pair
+        println("    skipped: ", rel(p), "  (needs ", basename(splitext(p)[1]), ".h5 in the same folder)")
+    end
+    isempty(targets) && (println("Nothing to export."); return false)
+
+    done, failed = String[], Pair{String,String}[]
+    t0 = time()
+    for (k, f) in enumerate(targets)
+        println("\n[", k, "/", length(targets), "] ", rel(f))
+        try
+            export_only_run(f, cfg; sr=sr, channel=channel)
+            push!(done, f)
+        catch e
+            msg = _short_export_error(f, e)
+            push!(failed, f => msg)
+            println(stderr, "  FAILED: ", msg)
+            @debug "export error details" exception = (e, catch_backtrace())
+        end
+        GC.gc()        # 녹음마다 spectrogram 이 커서 파일 사이에 메모리 정리
+    end
+
+    println("\n=== Export summary (", round(time() - t0; digits=1), " s) ===")
+    println("  exported: ", length(done), " / ", length(targets))
+    isempty(no_pair) || println("  skipped (no .h5): ", length(no_pair))
+    if !isempty(failed)
+        println("  failed: ", length(failed))
+        for (f, msg) in failed
+            println("    ", rel(f), ": ", msg)
+        end
+    end
+    return isempty(failed)
+end

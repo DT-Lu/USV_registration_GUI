@@ -1456,7 +1456,9 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
 
     if opts.export_only
-        return export_only_run(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        ok = export_only_batch(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        (!ok && !isinteractive()) && exit(1)     # 스크립트에서 실패 여부를 알 수 있게
+        return ok
     end
 
     win = @time make_gui(; file=opts.file, image_cfg=cfg, overrides=opts.overrides)
