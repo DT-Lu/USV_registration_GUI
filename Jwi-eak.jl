@@ -1642,12 +1642,64 @@ end
 choice = 1   # analog channel (load / legacy export 에서 사용; --channel 로 설정)
 
 # GUI 없이 .jld 의 box 로 이미지 + metadata.txt 만 만들기
-function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int)
+function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int,
+                         outroot::Union{Nothing,AbstractString}=nothing)
     println("Export only: ", file, "  (mode ", cfg.name, ", channel ", channel, ")")
     spec, lns_obs = load_file(String(file), channel)
     lns = lns_obs isa Observable ? lns_obs[] : lns_obs
     sequence_check!(lns)
-    return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec); sr=sr, channel=channel)
+    return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec);
+                            sr=sr, channel=channel, outroot=outroot)
+end
+
+# export-only 출력 위치 dialog. callback(x): x = :beside (각 .jld 옆, 예전 방식),
+#   고른 폴더 경로 (String), 또는 :cancel (취소 / Esc / 폴더 dialog 취소).
+function pick_export_outdir(callback::Function, input::AbstractString)
+    try
+        dlg = Gtk4.GtkAlertDialog("Export images (no GUI): where should the images go?"; modal=true)
+        Gtk4.G_.set_detail(dlg,
+            "Input: " * input * "\n\n" *
+            "Next to the input: each .jld gets its own <name>_images folder beside it.\n" *
+            "Choose folder: the <name>_images folders are created inside the folder you pick" *
+            (isdir(input) ? ", keeping the subfolder layout of the input folder." : "."))
+        Gtk4.G_.set_buttons(dlg, ["Next to the input", "Choose output folder...", "Cancel"])
+        Gtk4.choose(dlg, nothing) do d, resobj
+            idx = try
+                Gtk4.choose_finish(d, resobj)
+            catch e
+                e isa Gtk4.GLib.GErrorException || rethrow()
+                -1                                  # Esc / 창 닫기
+            end
+            if idx == 0
+                callback(:beside)
+            elseif idx == 1
+                open_dialog("Pick the output folder"; select_folder=true) do p
+                    callback((p === nothing || isempty(p)) ? :cancel : String(p))
+                end
+            else
+                callback(:cancel)
+            end
+        end
+    catch e
+        @error "output folder dialog failed; use --outdir on the command line instead" exception = (e, catch_backtrace())
+        callback(:cancel)
+    end
+    return nothing
+end
+
+# 입력 (폴더 / .jld) → 출력 폴더 순서로 dialog. callback(path, outroot):
+#   path === nothing 이면 취소. outroot === nothing 이면 .jld 옆에 출력.
+#   cli_outdir (--outdir) 가 있으면 출력 dialog 는 건너뜀.
+function pick_export_paths(callback::Function, cli_outdir)
+    pick_export_target() do p
+        p === nothing && return callback(nothing, nothing)
+        cli_outdir === nothing || return callback(p, cli_outdir)
+        pick_export_outdir(p) do o
+            o === :cancel ? callback(nothing, nothing) :
+                callback(p, o === :beside ? nothing : o)
+        end
+    end
+    return nothing
 end
 
 # --export-only 에 경로를 안 줬을 때: 폴더 / .jld 하나 중 고른 뒤 해당 선택 dialog.
@@ -1713,29 +1765,29 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
 
     if opts.export_only
-        path = opts.file
+        path, outroot = opts.file, opts.outdir
         if path === nothing
-            # 경로를 안 줬으면 dialog 로 고름 (폴더 또는 .jld 하나)
+            # 경로를 안 줬으면 dialog 로 고름: 입력 (폴더 또는 .jld 하나) → 출력 폴더 (--outdir 없을 때)
             if isinteractive()
                 # REPL: loop 가 이미 돌고 있으므로 고르면 callback 에서 바로 export
-                pick_export_target() do p
+                pick_export_paths(opts.outdir) do p, o
                     p === nothing ? println("Cancelled: nothing exported.") :
-                        export_only_batch(p, cfg; sr=opts.sr, channel=opts.channel)
+                        export_only_batch(p, cfg; sr=opts.sr, channel=opts.channel, outroot=o)
                 end
                 return nothing
             end
-            chosen = Ref{Union{Nothing,String}}(nothing)
+            chosen = Ref{Any}((nothing, nothing))
             Gtk4.GLib.start_main_loop()
-            pick_export_target() do p
-                chosen[] = p
+            pick_export_paths(opts.outdir) do p, o
+                chosen[] = (p, o)
                 notify(GUI_CLOSED)
             end
             wait(GUI_CLOSED)
             Gtk4.GLib.stop_main_loop()       # dialog 끝: export 는 GTK callback 밖에서 실행
-            path = chosen[]
+            path, outroot = chosen[]
             path === nothing && (println("Cancelled: nothing exported."); return nothing)
         end
-        ok = export_only_batch(path, cfg; sr=opts.sr, channel=opts.channel)
+        ok = export_only_batch(path, cfg; sr=opts.sr, channel=opts.channel, outroot=outroot)
         (!ok && !isinteractive()) && exit(1)     # 스크립트에서 실패 여부를 알 수 있게
         return ok
     end

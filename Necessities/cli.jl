@@ -19,7 +19,9 @@ Options:
       --format FMT     png | jpeg
       --export-only    no GUI: export images (+ metadata.txt) and exit. PATH = one .jld file, or a folder:
                        every .jld in it and its subfolders that has a matching .h5 next to it.
-                       Without PATH a dialog asks for a folder or a single .jld
+                       Without PATH a dialog asks for a folder or a single .jld, then for the output folder
+      --outdir DIR     with --export-only: put the <name>_images folders in DIR (subfolder layout kept)
+                       instead of next to each .jld
       --sr X           contrast cap for --export-only (GUI sngscale value; default 0.5)
       --window W       start window size: fit (default, ~90% of the screen), max, or WxH (e.g. 1280x720)
       --list-modes     print the image modes and exit
@@ -72,12 +74,12 @@ end
 """
     parse_cli(args) -> NamedTuple
 
-(; file, channel, mode, overrides, export_only, sr, help, list_modes)
+(; file, channel, mode, overrides, export_only, sr, outdir, help, list_modes, window)
 `overrides` 는 image_mode_config 에 넘길 NamedTuple.
 """
 function parse_cli(args::AbstractVector{<:AbstractString})
     file = nothing; channel = 1; mode = nothing
-    overrides = (;); export_only = false; sr = 0.5
+    overrides = (;); export_only = false; sr = 0.5; outdir = nothing
     help = false; list_modes = false; window = :fit
     i = 1
     function value(opt)
@@ -117,6 +119,8 @@ function parse_cli(args::AbstractVector{<:AbstractString})
             overrides = merge(overrides, (; ext=fm))
         elseif a == "--export-only"
             export_only = true
+        elseif a == "--outdir"
+            outdir = value(a)
         elseif a == "--window"
             v = lowercase(value(a))
             window = v == "fit" ? :fit : v == "max" ? :max : _parse_canvas(v)
@@ -149,5 +153,10 @@ function parse_cli(args::AbstractVector{<:AbstractString})
         mode === nothing && throw(CLIError("--export-only needs --mode"))
         mode == "lite" && throw(CLIError("--export-only with --mode lite would export nothing"))
     end
-    return (; file, channel, mode, overrides, export_only, sr, help, list_modes, window)
+    if outdir !== nothing
+        export_only || throw(CLIError("--outdir only works with --export-only"))
+        ispath(outdir) && !isdir(outdir) && throw(CLIError("--outdir must be a folder, got a file: $outdir"))
+        outdir = abspath(outdir)          # 없으면 export 할 때 만듦
+    end
+    return (; file, channel, mode, overrides, export_only, sr, outdir, help, list_modes, window)
 end

@@ -130,7 +130,8 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `--band B` | image frequency range: `box` (each box's own range), `full`, or LO-HI in kHz, e.g. `30-125` |
 | `--pad-ms MS` | time padding on each side of a box |
 | `--format FMT` | `png` or `jpeg` |
-| `--export-only` | no GUI: write images + `metadata.txt` and exit (needs `--mode`). PATH is one `.jld`, or a **folder**: every `.jld` in it and its subfolders that has a matching `.h5` next to it. Without PATH, a dialog asks for a folder or a `.jld` |
+| `--export-only` | no GUI: write images + `metadata.txt` and exit (needs `--mode`). PATH is one `.jld`, or a **folder**: every `.jld` in it and its subfolders that has a matching `.h5` next to it. Without PATH, a dialog asks for a folder or a `.jld`, then for the output folder |
+| `--outdir DIR` | with `--export-only`: create the `<name>_images/` folders inside `DIR` (keeping the input's subfolder layout) instead of next to each `.jld` |
 | `--window W` | start window size: `fit` (default, ~90% of the screen), `max`, or `WxH`, e.g. `1280x720` |
 | `--sr X` | contrast cap for `--export-only` (the GUI's sngscale value, default 0.5) |
 | `--list-modes`, `-h`, `--help` | print modes / help |
@@ -141,14 +142,21 @@ Export a whole folder (including subfolders) without opening the GUI:
 julia --project=. Jwi-eak.jl "D:/USV data/batch21" --export-only --mode fixed
 ```
 
-Leave out the path to choose it in a dialog instead. It first asks **Folder** or **Single .jld file**, then opens the matching picker:
+Leave out the path to choose it in a dialog instead. It first asks **Folder** or **Single .jld file**, then opens the matching picker. A second dialog then asks where the images go: **Next to the input** (the default layout) or **Choose output folder...**:
 
 ```bash
 julia --project=. Jwi-eak.jl --export-only --mode fixed
 ```
 
+To send the output somewhere else without the dialog, add `--outdir`:
+
+```bash
+julia --project=. Jwi-eak.jl "D:/USV data/batch21" --export-only --mode fixed --outdir "E:/exports/batch21"
+```
+
 * `.jld` files without a same-named `.h5` in the same folder are listed as skipped.
-* Each `.jld` gets its own `<name>_images/` (or `_jpegs/`) folder with `metadata.txt`, next to the file.
+* Each `.jld` gets its own `<name>_images/` (or `_jpegs/`) folder with `metadata.txt`, next to the file. With an output folder, the same folders are created inside it, mirroring the input's subfolders (`batch21/day2/rec.jld` → `<outdir>/day2/rec_images/`).
+* When the path is given on the command line, no output dialog appears (scripts stay unattended): use `--outdir`, or leave it out to write next to each file.
 * A file that fails, such as a truncated `.h5`, is reported with a one-line reason and the export continues with the next file.
 * A summary is printed at the end. Julia exits with code 1 if any file failed or nothing was found.
 

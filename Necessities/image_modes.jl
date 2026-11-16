@@ -111,14 +111,18 @@ end
 # boxes : [(t1, t2, f_lo_hz, f_hi_hz), ...]  (시간 순서, .jld 에 저장된 순서와 같아야 함)
 # sr    : 대비 상한 (GUI sngscale 값)
 # live_canvas_px : 현재 GUI spectrogram 창 크기 (없으면 nothing)
+# outroot : 출력 폴더를 만들 위치. nothing → .jld 옆 (예전과 같음),
+#           폴더 → 그 안에 <name>_images (또는 _jpegs)
 # 반환: 출력 폴더 (lite 면 nothing)
 function run_image_export(cfg, nmjld::AbstractString, spec, boxes;
                           sr::Real, channel::Int=1,
-                          live_canvas_px::Union{Nothing,Tuple{Int,Int}}=nothing)
+                          live_canvas_px::Union{Nothing,Tuple{Int,Int}}=nothing,
+                          outroot::Union{Nothing,AbstractString}=nothing)
     cfg.style === :none && (println("Image mode lite: image export skipped"); return nothing)
 
     dotloc = findlast('.', nmjld)
     base = (dotloc === nothing) ? nmjld : nmjld[1:(dotloc-1)]
+    outbase = outroot === nothing ? base : joinpath(outroot, basename(base))
     f = spec_freq_axis(spec)
     t = spec.t_sng
     dt = length(t) >= 2 ? Float64(t[2] - t[1]) : NaN
@@ -141,7 +145,7 @@ function run_image_export(cfg, nmjld::AbstractString, spec, boxes;
     ]
 
     if cfg.style === :legacy128
-        outdir = string(base, "_jpegs")
+        outdir = string(outbase, "_jpegs")
         export_usv_jpegs_lowcut(nmjld; outdir=outdir, outH=128, outW=128,
                                 contrast=:quantile, keep_aspect=false,
                                 qlo=0.02, qhi=0.98, gamma=1.0, idx=channel)
@@ -165,7 +169,7 @@ function run_image_export(cfg, nmjld::AbstractString, spec, boxes;
     else
         DEFAULT_CANVAS_PX, "default (no GUI window)"
     end
-    outdir = string(base, "_images")
+    outdir = string(outbase, "_images")
     tspans = [(b[1], b[2]) for b in boxes]
     fspans = [(b[3], b[4]) for b in boxes]
     rows = export_usv_images_gui(spec.fout, f, t, tspans;
@@ -245,12 +249,21 @@ function _short_export_error(path, e)
 end
 
 # export-only 일괄 실행. 파일 하나가 실패해도 다음 파일로 계속. 반환: 모두 성공했으면 true.
-function export_only_batch(path::AbstractString, cfg; sr::Real, channel::Int)
+# outroot : nothing → 각 .jld 옆에 출력. 폴더 → 그 안에 출력 (입력 폴더의 하위 폴더 구조 유지,
+#           같은 이름의 .jld 가 다른 하위 폴더에 있어도 겹치지 않게).
+function export_only_batch(path::AbstractString, cfg; sr::Real, channel::Int,
+                           outroot::Union{Nothing,AbstractString}=nothing)
     targets, no_pair = find_export_targets(path)
     root = isdir(path) ? abspath(path) : dirname(abspath(path))
     rel(p) = relpath(p, root)
+    function dest(f)
+        outroot === nothing && return nothing
+        sub = relpath(dirname(f), root)
+        return sub == "." ? abspath(outroot) : normpath(joinpath(abspath(outroot), sub))
+    end
     println("Export only: ", abspath(path))
     println("  mode ", cfg.name, ", channel ", channel, ", sr ", sr)
+    println("  output: ", outroot === nothing ? "next to each .jld" : abspath(outroot))
     println("  ", length(targets), " .jld file(s) with a matching .h5",
             isempty(no_pair) ? "" : ", $(length(no_pair)) skipped (no matching .h5)")
     for p in no_pair
@@ -263,7 +276,7 @@ function export_only_batch(path::AbstractString, cfg; sr::Real, channel::Int)
     for (k, f) in enumerate(targets)
         println("\n[", k, "/", length(targets), "] ", rel(f))
         try
-            export_only_run(f, cfg; sr=sr, channel=channel)
+            export_only_run(f, cfg; sr=sr, channel=channel, outroot=dest(f))
             push!(done, f)
         catch e
             msg = _short_export_error(f, e)
