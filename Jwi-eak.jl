@@ -1650,6 +1650,38 @@ function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int)
     return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec); sr=sr, channel=channel)
 end
 
+# --export-only 에 경로를 안 줬을 때: 폴더 / .jld 하나 중 고른 뒤 해당 선택 dialog.
+#   callback(path) — path 는 고른 폴더나 .jld 의 경로, 취소하면 nothing.
+#   (GTK4 dialog 는 비동기라 callback 으로 이어짐; 버튼 dialog 는 image mode 선택과 같은 GtkAlertDialog)
+function pick_export_target(callback::Function)
+    done(p) = callback((p === nothing || isempty(p)) ? nothing : String(p))
+    try
+        dlg = Gtk4.GtkAlertDialog("Export images (no GUI): what should be exported?"; modal=true)
+        Gtk4.G_.set_detail(dlg, "Folder: every .jld in the folder and its subfolders that has a matching .h5 next to it.\n" *
+                                "Single file: one .jld annotation (its .h5 must be in the same folder).")
+        Gtk4.G_.set_buttons(dlg, ["Folder...", "Single .jld file...", "Cancel"])
+        Gtk4.choose(dlg, nothing) do d, resobj
+            idx = try
+                Gtk4.choose_finish(d, resobj)
+            catch e
+                e isa Gtk4.GLib.GErrorException || rethrow()
+                -1                                  # Esc / 창 닫기
+            end
+            if idx == 0
+                open_dialog(done, "Pick the folder to export"; select_folder=true)
+            elseif idx == 1
+                open_dialog(done, "Pick a .jld annotation", nothing, ["*.jld"])
+            else
+                done(nothing)
+            end
+        end
+    catch e
+        @error "export dialog failed; give the path on the command line instead" exception = (e, catch_backtrace())
+        done(nothing)
+    end
+    return nothing
+end
+
 # 어떤 버전으로 실행 중인지 (log 를 보고 바로 알 수 있게). git 이 없으면 생략.
 function version_banner()
     try
@@ -1681,7 +1713,29 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
 
     if opts.export_only
-        ok = export_only_batch(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        path = opts.file
+        if path === nothing
+            # 경로를 안 줬으면 dialog 로 고름 (폴더 또는 .jld 하나)
+            if isinteractive()
+                # REPL: loop 가 이미 돌고 있으므로 고르면 callback 에서 바로 export
+                pick_export_target() do p
+                    p === nothing ? println("Cancelled: nothing exported.") :
+                        export_only_batch(p, cfg; sr=opts.sr, channel=opts.channel)
+                end
+                return nothing
+            end
+            chosen = Ref{Union{Nothing,String}}(nothing)
+            Gtk4.GLib.start_main_loop()
+            pick_export_target() do p
+                chosen[] = p
+                notify(GUI_CLOSED)
+            end
+            wait(GUI_CLOSED)
+            Gtk4.GLib.stop_main_loop()       # dialog 끝: export 는 GTK callback 밖에서 실행
+            path = chosen[]
+            path === nothing && (println("Cancelled: nothing exported."); return nothing)
+        end
+        ok = export_only_batch(path, cfg; sr=opts.sr, channel=opts.channel)
         (!ok && !isinteractive()) && exit(1)     # 스크립트에서 실패 여부를 알 수 있게
         return ok
     end

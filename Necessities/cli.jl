@@ -18,7 +18,8 @@ Options:
       --pad-ms MS      time padding on each side of a box
       --format FMT     png | jpeg
       --export-only    no GUI: export images (+ metadata.txt) and exit. PATH = one .jld file, or a folder:
-                       every .jld in it and its subfolders that has a matching .h5 next to it
+                       every .jld in it and its subfolders that has a matching .h5 next to it.
+                       Without PATH a dialog asks for a folder or a single .jld
       --sr X           contrast cap for --export-only (GUI sngscale value; default 0.5)
       --window W       start window size: fit (default, ~90% of the screen), max, or WxH (e.g. 1280x720)
       --list-modes     print the image modes and exit
@@ -142,8 +143,8 @@ function parse_cli(args::AbstractVector{<:AbstractString})
         file = abspath(file)
     end
     if export_only && !help && !list_modes
-        file === nothing && throw(CLIError("--export-only needs a .jld file or a folder"))
-        (isdir(file) || endswith(lowercase(file), ".jld")) ||
+        # file === nothing → 실행 시 dialog 로 폴더 / .jld 선택
+        file === nothing || isdir(file) || endswith(lowercase(file), ".jld") ||
             throw(CLIError("--export-only needs a .jld file (boxes come from it) or a folder of them"))
         mode === nothing && throw(CLIError("--export-only needs --mode"))
         mode == "lite" && throw(CLIError("--export-only with --mode lite would export nothing"))
