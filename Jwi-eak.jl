@@ -1439,6 +1439,34 @@ function export_only_run(file::AbstractString, cfg; sr::Real, channel::Int)
     return run_image_export(cfg, file, spec, liness_to_boxes(lns, spec); sr=sr, channel=channel)
 end
 
+# --export-only 에 경로를 안 줬을 때: 폴더 / .jld 하나 중 고른 뒤 해당 선택 dialog.
+#   반환: 고른 폴더나 .jld 의 경로, 취소하면 nothing. (GTK3 dialog 는 run 으로 기다림)
+function pick_export_target()
+    msg = "Export images (no GUI): what should be exported?\n\n" *
+          "Folder: every .jld in the folder and its subfolders that has a matching .h5 next to it.\n" *
+          "Single file: one .jld annotation (its .h5 must be in the same folder)."
+    choice_ = try
+        # flags 2 = DESTROY_WITH_PARENT, type 2 = QUESTION (choose_image_mode 와 같은 생성자)
+        dlg = Gtk.GtkMessageDialog(msg, (("Folder...", 1), ("Single .jld file...", 2), ("Cancel", 0)),
+                                   2, 2, Gtk.GtkNullContainer())
+        r = Gtk.run(dlg)
+        Gtk.destroy(dlg)
+        r
+    catch e
+        @error "export dialog failed; give the path on the command line instead" exception = (e, catch_backtrace())
+        0
+    end
+    p = if choice_ == 1
+        # Gtk.jl 의 open_dialog 는 "파일 열기" 고정 → action 속성으로 폴더 선택 (2 = SELECT_FOLDER)
+        open_dialog("Pick the folder to export"; action=Gtk.GConstants.GtkFileChooserAction.SELECT_FOLDER)
+    elseif choice_ == 2
+        open_dialog("Pick a .jld annotation", Gtk.GtkNullContainer(), ["*.jld"])
+    else
+        ""
+    end
+    return (p === nothing || isempty(p)) ? nothing : String(p)
+end
+
 function main(args::AbstractVector{<:AbstractString}=ARGS)
     opts = try
         parse_cli(args)
@@ -1456,7 +1484,12 @@ function main(args::AbstractVector{<:AbstractString}=ARGS)
     cfg = opts.mode === nothing ? nothing : image_mode_config(opts.mode; overrides=opts.overrides)
 
     if opts.export_only
-        ok = export_only_batch(opts.file, cfg; sr=opts.sr, channel=opts.channel)
+        path = opts.file
+        if path === nothing
+            path = pick_export_target()     # 경로를 안 줬으면 dialog 로 고름 (폴더 또는 .jld 하나)
+            path === nothing && (println("Cancelled: nothing exported."); return nothing)
+        end
+        ok = export_only_batch(path, cfg; sr=opts.sr, channel=opts.channel)
         (!ok && !isinteractive()) && exit(1)     # 스크립트에서 실패 여부를 알 수 있게
         return ok
     end

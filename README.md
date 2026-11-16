@@ -105,7 +105,7 @@ The launchers do the same from any folder: `./jwi-eak.sh` on Linux/macOS, `jwi-e
 | `--band B` | image frequency range: `box` (each box's own range), `full`, or LO-HI in kHz, e.g. `30-125` |
 | `--pad-ms MS` | time padding on each side of a box |
 | `--format FMT` | `png` or `jpeg` |
-| `--export-only` | no GUI: write images + `metadata.txt` and exit (needs `--mode`). PATH is one `.jld`, or a **folder**: every `.jld` in it and its subfolders that has a matching `.h5` next to it |
+| `--export-only` | no GUI: write images + `metadata.txt` and exit (needs `--mode`). PATH is one `.jld`, or a **folder**: every `.jld` in it and its subfolders that has a matching `.h5` next to it. Without PATH, a dialog asks for a folder or a `.jld` |
 | `--sr X` | contrast cap for `--export-only` (the GUI's sngscale value, default 0.5) |
 | `--list-modes`, `-h`, `--help` | print modes / help |
 
@@ -113,6 +113,12 @@ Export a whole folder (including subfolders) without opening the GUI:
 
 ```bash
 julia --project=. Jwi-eak.jl "D:/USV data/batch21" --export-only --mode fixed
+```
+
+Leave out the path to choose it in a dialog instead. It first asks **Folder** or **Single .jld file**, then opens the matching picker:
+
+```bash
+julia --project=. Jwi-eak.jl --export-only --mode fixed
 ```
 
 * `.jld` files without a same-named `.h5` in the same folder are listed as skipped.
